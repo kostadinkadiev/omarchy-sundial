@@ -85,7 +85,15 @@ because being left in the dark when you walk into sunlight is a usability
 failure while a cloud briefly dimming the room is not. A deadband stops the
 plugin writing at all for changes too small to see.
 
-**5. Manual overrides are detected exactly.** The backlight sysfs value is
+**5. The slider and the keys are different things.** The popup's **Overall**
+slider is a standing preference: it shifts the whole curve, and the sun never
+takes it back. The brightness keys are a temporary override on top of that,
+held until the schedule has moved somewhere clearly different — so an
+afternoon override survives the afternoon and is released by the evening ramp.
+Switching the plugin off stops it writing entirely, and switching it back on
+takes control immediately.
+
+**6. Manual overrides are detected exactly.** The backlight sysfs value is
 compared against the last value this plugin wrote, so reaching for the
 brightness keys is unambiguous — no threshold to tune, no polling race. Control
 resumes once the schedule has moved somewhere clearly different from where you

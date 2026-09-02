@@ -113,7 +113,9 @@ Item {
   function applySettings() {
     if (!shell) return
     var settings = currentSettings()
+    var wasAutomatic = automatic
     automatic = settings.automatic === undefined ? true : settings.automatic === true
+    if (automatic && !wasAutomatic) resume()
     dayBrightness = clampSetting(settings.dayBrightness, 10, 100, 85)
     nightBrightness = clampSetting(settings.nightBrightness, 1, 100, 25)
     ambientGainExplicit = settings.ambientGain === undefined || settings.ambientGain === null
@@ -157,16 +159,16 @@ Item {
 
     target = Curve.target(elevation, ambientGain > 0 ? lux : null, curveSettings())
 
+    if (!automatic) return
+
     // A manual override stands until the schedule has moved somewhere clearly
-    // different from where the user made it — otherwise every override would
-    // be undone within the minute, and pinning it forever would mean one
-    // evening tap disables the plugin until reboot.
+    // different from where the user made it. This sits below the automatic
+    // check on purpose: an override is only meaningful while there is a
+    // schedule to override.
     if (manualOverride) {
-      if (Math.abs(target - overrideTarget) < resumeThreshold) return
+      if (!Curve.overrideExpired(target, overrideTarget, resumeThreshold)) return
       resume()
     }
-
-    if (!automatic) return
 
     // No location means no schedule. The curve's own fallback is daytime
     // brightness, which is the right answer for a missing reading mid-run but
@@ -231,7 +233,8 @@ Item {
     // reaching for the brightness keys. Comparing against the last value
     // written here detects that exactly, with no polling race and no
     // threshold to tune.
-    if (lastWrittenRaw >= 0 && raw !== lastWrittenRaw && !writeProcess.running && !manualOverride) {
+    if (automatic && lastWrittenRaw >= 0 && raw !== lastWrittenRaw
+        && !writeProcess.running && !manualOverride) {
       manualOverride = true
       overrideTarget = target
     }
@@ -248,8 +251,16 @@ Item {
   function tick() {
     updateElevation()
     if (hasSensor) sensorFile.reload()
-    backlightFile.reload()
-    evaluate()
+
+    // evaluate() is driven by backlightFile.onLoaded, not called here.
+    // FileView.reload() is asynchronous, so evaluating straight after it ran
+    // the loop on a stale reading, issued a slew write, and set
+    // writeProcess.running — which then suppressed the override check when the
+    // real reading finally arrived. The effect was that brightness keys were
+    // invisible for as long as the plugin was ramping, and only worked once it
+    // had settled. Deciding after the read closes that window.
+    if (backlightDevice === "") evaluate()
+    else backlightFile.reload()
   }
 
   // -------------------------------------------------------------- sources
@@ -288,7 +299,10 @@ Item {
     id: backlightFile
     path: root.backlightDevice === "" ? "" : "/sys/class/backlight/" + root.backlightDevice + "/brightness"
     printErrors: false
-    onLoaded: root.noteBacklight(text())
+    onLoaded: {
+      root.noteBacklight(text())
+      root.evaluate()
+    }
   }
 
   FileView {

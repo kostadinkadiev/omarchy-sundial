@@ -95,6 +95,14 @@ check("target respects the ceiling",
 check("median ignores a single spike", Curve.median([10, 11, 10, 9000, 12]) === 11);
 check("median of empty is null", Curve.median([]) === null);
 
+check("an override holds while the schedule barely moves",
+  !Curve.overrideExpired(40, 45, 15));
+check("an override yields once the schedule has moved on",
+  Curve.overrideExpired(70, 45, 15));
+check("override expiry is symmetric",
+  Curve.overrideExpired(20, 45, 15) && Curve.overrideExpired(70, 45, 15));
+check("an exact threshold move expires it", Curve.overrideExpired(60, 45, 15));
+
 check("deadband suppresses small moves", Curve.withinDeadband(50, 52, 3));
 check("deadband allows real moves", !Curve.withinDeadband(50, 60, 3));
 
