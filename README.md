@@ -25,7 +25,7 @@ the sun curve is the whole schedule there.
 ## Install
 
 ```sh
-omarchy plugin add https://github.com/kostadinkadiev/kokd.adaptive-brightness.git --enable
+omarchy plugin add https://github.com/kostadinkadiev/omarchy-adaptive-brightness.git --enable
 ```
 
 ## How it decides
