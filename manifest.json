@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "id": "kokd.daylight",
-  "name": "Daylight",
+  "id": "kokd.sundial",
+  "name": "Sundial",
   "version": "0.1.0",
   "author": "Kostadin Kadiev",
   "license": "MIT",
@@ -15,7 +15,7 @@
     "barWidget": "Panel.qml"
   },
   "barWidget": {
-    "displayName": "Daylight",
+    "displayName": "Sundial",
     "description": "Brightness that follows the sun, on any machine.",
     "category": "System",
     "aliases": [
@@ -29,7 +29,10 @@
       "night",
       "sun",
       "daylight",
-      "dim"
+      "dim",
+      "sundial",
+      "solar",
+      "sun-based"
     ],
     "allowMultiple": false,
     "defaultSection": "right",

@@ -1,4 +1,4 @@
-# Daylight
+# Sundial
 
 Brightness that follows the sun, on any machine.
 
@@ -14,7 +14,7 @@ It works on machines with no light sensor at all — including desktops — beca
 the sun curve is the whole schedule there.
 
 Omarchy already has ambient-light plugins, and good ones. What none of them
-have is time: they are pure ALS and require a sensor to do anything. Daylight
+have is time: they are pure ALS and require a sensor to do anything. Sundial
 schedules on the sun's position, so it has an opinion about your screen at
 22:00 in December whether or not your laptop can see the room.
 
@@ -33,18 +33,18 @@ schedules on the sun's position, so it has an opinion about your screen at
 ## Install
 
 ```sh
-omarchy plugin add https://github.com/kostadinkadiev/omarchy-daylight.git --enable
+omarchy plugin add https://github.com/kostadinkadiev/omarchy-sundial.git --enable
 ```
 
-The repository is `omarchy-daylight`; the plugin id is
-`kokd.daylight`. That is deliberate, not a mismatch. `omarchy plugin
+The repository is `omarchy-sundial`; the plugin id is `kokd.sundial`. The
+names differ on purpose. `omarchy plugin
 add` reads the id out of the manifest and installs to
 `~/.config/omarchy/plugins/<id>/`, so the repo name is only ever the thing you
 paste once — every command afterwards takes the id:
 
 ```sh
-omarchy plugin update kokd.daylight
-omarchy plugin remove kokd.daylight
+omarchy plugin update kokd.sundial
+omarchy plugin remove kokd.sundial
 ```
 
 The id carries an author prefix because ids are unique across every plugin a
@@ -182,11 +182,11 @@ everyone else.
 ## IPC
 
 ```sh
-omarchy-shell kokd.daylight-backend status | jq
-omarchy-shell kokd.daylight-backend resume
-omarchy-shell kokd.daylight-backend refresh
+omarchy-shell kokd.sundial-backend status | jq
+omarchy-shell kokd.sundial-backend resume
+omarchy-shell kokd.sundial-backend refresh
 
-omarchy-shell kokd.daylight toggle    # the popup itself
+omarchy-shell kokd.sundial toggle    # the popup itself
 ```
 
 Both targets are namespaced because IPC targets are global to the one

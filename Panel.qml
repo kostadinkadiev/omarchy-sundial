@@ -18,8 +18,8 @@ import "lib/Status.js" as Status
 // in shell.json for anyone who wants them.
 Panel {
   id: root
-  moduleName: "kokd.daylight"
-  ipcTarget: "kokd.daylight"
+  moduleName: "kokd.sundial"
+  ipcTarget: "kokd.sundial"
 
   readonly property var backend: bar && bar.shell ? bar.shell.serviceFor(moduleName) : null
   readonly property bool automatic: backend ? backend.automatic : false
@@ -100,9 +100,9 @@ Panel {
     dimmed: !root.automatic
     active: root.manualOverride
     tooltipText: root.automatic
-      ? "Daylight · " + root.current + "% · " + root.phase
+      ? "Sundial · " + root.current + "% · " + root.phase
         + " (sun " + root.elevationText + ")"
-      : "Daylight paused"
+      : "Sundial paused"
     onPressed: function(mouseButton) {
       if (mouseButton === Qt.RightButton)
         root.persistSetting("automatic", !root.automatic)
@@ -150,7 +150,7 @@ Panel {
 
           Text {
             id: heroTitle
-            text: "Daylight"
+            text: "Sundial"
             color: root.barForeground
             font.family: root.bar ? root.bar.fontFamily : Style.font.family
             font.pixelSize: Style.font.title

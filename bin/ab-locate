@@ -17,7 +17,7 @@
 set -uo pipefail
 
 WEATHER_FILE="$HOME/.local/state/omarchy/settings/weather.json"
-CACHE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy/kokd.adaptive-brightness"
+CACHE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy/kokd.sundial"
 CACHE_FILE="$CACHE_DIR/location.json"
 
 # Emit the file's contents when it carries usable coordinates.
