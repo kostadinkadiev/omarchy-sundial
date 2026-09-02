@@ -69,10 +69,9 @@ target = solarBaseline(elevation)
 Illuminance is normalized logarithmically, because perceived brightness is
 logarithmic: 10 → 100 lux is the same perceptual step as 100 → 1000, and a
 linear lux table spends most of its resolution on daylight nobody can tell
-apart. `gain` is the **Room light** choice in the popup — *Sun only* (0), *Balanced*
-(30), or *Strong* (55). It defaults to Balanced on a machine that has a sensor
-and to Sun only on one that does not, so the sensor is used out of the box
-rather than waiting to be discovered.
+apart. `gain` defaults to 30 on a machine that has a sensor and 0 on one that does
+not, so the sensor is used out of the box rather than waiting to be discovered.
+It has no control in the popup — see **The panel** below.
 
 **4. Filtering tuned for how the failure feels.** Samples are reduced with a
 **median**, not a mean — one camera flash or passing headlight destroys a mean.
@@ -127,9 +126,28 @@ Framework laptops; tier `acpi` covers Intel MacBooks and older ACPI laptops.
 bin/ab-probe | jq
 ```
 
-Dragging **Daytime** or **Night brightness** previews that level on the screen
-while you hold it, and releases back to the schedule — so you can see the night
-without waiting for it.
+
+## The panel
+
+Two controls: an on/off toggle, and one **Overall** slider from dimmer to
+brighter. Above them, a sentence — *"Following the sun in Skopje. Your room is
+dark, so it's dimmer than usual."*
+
+An earlier version led with three stat cards reporting sun elevation in
+degrees, raw lux, and a target percentage, then offered the toggle, two curve
+anchors and a three-way sensor strength. That is a readout of the controller's
+internals; it existed because it was useful to the person writing the
+controller. Someone opening a brightness panel is asking "why is my screen like
+this, and how do I change it", and that is a sentence and a slider.
+
+The **Overall** slider is a standing preference. The brightness keys still work
+and still give a temporary override on top of it; the difference is that this
+one persists. Dragging it previews the resulting brightness on the screen while
+you hold it.
+
+`dayBrightness`, `nightBrightness` and `ambientGain` remain settings — they are
+simply not controls. Edit them in `shell.json` if the defaults are wrong for
+you.
 
 ## Settings
 
@@ -144,9 +162,9 @@ shell's storage rules. All are editable from the popup.
 | `ambientGain` | sensor: `30`, none: `0` | How far room light may pull away from the sun curve |
 | `offsetPercent` | `0` | A flat shift applied to the whole curve |
 
-`offsetPercent` has no slider in the popup: with both curve anchors already
-exposed, a third "shift everything" control says nothing the anchors cannot.
-It stays in the schema because the learned-override work will drive it.
+`offsetPercent` is the popup's **Overall** slider. The other three have no
+control; they are defaults that are right for most people and editable here for
+everyone else.
 
 ## IPC
 

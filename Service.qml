@@ -49,6 +49,10 @@ Item {
   property real elevation: NaN
   readonly property string phase: Solar.phase(elevation)
   readonly property string phaseShort: Solar.phaseShort(elevation)
+  readonly property bool ambientActive: hasSensor && ambientGain > 0
+  readonly property real ambientDelta: (ambientActive && lux !== null && isFinite(elevation))
+    ? Curve.luxScore(lux) - Curve.expectedLuxScore(elevation)
+    : 0
 
   property string backlightDevice: ""
   property int maxRaw: 0
@@ -206,6 +210,12 @@ Item {
   function previewBrightness(percent) {
     previewing = true
     write(Math.max(1, Math.min(100, Math.round(percent))))
+  }
+
+  function previewOffset(value) {
+    var settings = curveSettings()
+    settings.offsetPercent = value
+    previewBrightness(Curve.target(elevation, ambientGain > 0 ? lux : null, settings))
   }
 
   function endPreview() {

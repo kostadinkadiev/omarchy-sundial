@@ -18,6 +18,7 @@ function load(name) {
 var Solar = load("Solar.js");
 var Curve = load("Curve.js");
 var Sensor = load("Sensor.js");
+var Status = load("Status.js");
 
 var failures = 0;
 function check(name, condition, detail) {
@@ -121,6 +122,39 @@ check("bad probe degrades to no sensor", Sensor.parseProbe("not json").sensorKin
 check("percent from raw", Sensor.percentFromRaw(256, 512) === 50);
 check("percent guards zero max", Sensor.percentFromRaw(10, 0) === null);
 check("no sensor reads as such", Sensor.lightName(null) === "No sensor");
+
+// ---------------------------------------------------------------- Status.js
+var base = { hasLocation: true, automatic: true, manualOverride: false,
+             locationName: "Skopje", hasSensor: true, ambientActive: true, ambientDelta: 0 };
+function withState(extra) {
+  var out = {};
+  for (var k in base) out[k] = base[k];
+  for (var k2 in extra) out[k2] = extra[k2];
+  return out;
+}
+
+check("names the place", Status.sentence(base).indexOf("in Skopje") !== -1);
+check("dark room is explained",
+  Status.sentence(withState({ ambientDelta: -0.3 })).indexOf("dark") !== -1);
+check("bright room is explained",
+  Status.sentence(withState({ ambientDelta: 0.3 })).indexOf("bright") !== -1);
+check("a small delta is not dressed up as dark",
+  Status.sentence(withState({ ambientDelta: -0.02 })).indexOf("dark") === -1);
+check("paused says so",
+  Status.sentence(withState({ automatic: false })).indexOf("Paused") === 0);
+check("paused outranks the room",
+  Status.sentence(withState({ automatic: false, ambientDelta: -0.9 })).indexOf("dark") === -1);
+check("override explains itself",
+  Status.sentence(withState({ manualOverride: true })).indexOf("by hand") !== -1);
+check("no location outranks everything",
+  Status.sentence(withState({ hasLocation: false, automatic: false })).indexOf("no sun to follow") !== -1);
+check("no location quotes the reason",
+  Status.sentence(withState({ hasLocation: false, locationError: "offline" })).indexOf("offline") !== -1);
+check("no sensor stops at the sun",
+  Status.sentence(withState({ hasSensor: false, ambientDelta: -0.9 })).indexOf("room") === -1);
+check("sun-only stops at the sun",
+  Status.sentence(withState({ ambientActive: false, ambientDelta: -0.9 })).indexOf("room") === -1);
+check("never returns empty", Status.sentence({}).length > 0);
 
 if (failures) {
   console.error("\n" + failures + " test(s) failed");
