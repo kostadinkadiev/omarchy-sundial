@@ -95,13 +95,52 @@ check("target respects the ceiling",
 check("median ignores a single spike", Curve.median([10, 11, 10, 9000, 12]) === 11);
 check("median of empty is null", Curve.median([]) === null);
 
-check("an override holds while the schedule barely moves",
-  !Curve.overrideExpired(40, 45, 15));
-check("an override yields once the schedule has moved on",
-  Curve.overrideExpired(70, 45, 15));
-check("override expiry is symmetric",
-  Curve.overrideExpired(20, 45, 15) && Curve.overrideExpired(70, 45, 15));
-check("an exact threshold move expires it", Curve.overrideExpired(60, 45, 15));
+// ---------------------------------------------------------------- learning
+check("phase keys match the bands phaseShort reports",
+  Solar.phaseKey(30) === "day" && Solar.phaseKey(5) === "golden"
+  && Solar.phaseKey(-3) === "dusk" && Solar.phaseKey(-20) === "night");
+check("no phase key without a sun angle", Solar.phaseKey(NaN) === "");
+
+check("an empty table reads as zero everywhere",
+  Curve.learnedOffset(null, "night") === 0 && !Curve.hasLearned(null));
+check("learning one band leaves the others alone", function () {
+  var table = Curve.learn(null, "night", -18);
+  return table.night === -18 && table.day === 0 && table.golden === 0 && table.dusk === 0;
+}());
+check("learning accumulates within a band",
+  Curve.learn(Curve.learn(null, "day", 5), "day", 4).day === 9);
+check("an unknown band teaches nothing",
+  !Curve.hasLearned(Curve.learn(null, "", -20)));
+check("a garbage table degrades to zero rather than NaN",
+  Curve.learnedOffset({ night: "nonsense" }, "night") === 0);
+check("stored offsets are bounded",
+  Curve.learn(null, "day", 5000).day === 100 && Curve.learn(null, "day", -5000).day === -100);
+check("forgetting clears every band", !Curve.hasLearned(Curve.forgetLearned()));
+check("sub-1% is rounding, not a preference", !Curve.hasLearned({ night: 0.4 }));
+
+check("a learned offset moves the target", function () {
+  var plain = Curve.target(-20, null, {});
+  return Curve.target(-20, null, { learnedOffset: -18 }) === plain - 18;
+}());
+
+// The property the whole design rests on: after absorbing an adjustment the
+// target equals what the user set, so the loop has nothing left to correct.
+// Anything less than full absorption leaves a residual the slew would chase,
+// which is the fighting the manual override existed to paper over.
+check("absorbing an adjustment leaves nothing to correct", function () {
+  var settings = { learnedOffset: 0 };
+  var wanted = Curve.target(-20, null, settings);   // 25
+  var user = 12;                                    // user dims to 12%
+  settings.learnedOffset = Curve.learn(null, "night", user - wanted).night;
+  return Curve.target(-20, null, settings) === user;
+}());
+
+check("absorption survives a band the schedule ramps through", function () {
+  var settings = { learnedOffset: 0 };
+  var wanted = Curve.target(-3, null, settings);
+  settings.learnedOffset = Curve.learn(null, "dusk", 70 - wanted).dusk;
+  return Curve.target(-3, null, settings) === 70;
+}());
 
 check("deadband suppresses small moves", Curve.withinDeadband(50, 52, 3));
 check("deadband allows real moves", !Curve.withinDeadband(50, 60, 3));
@@ -152,8 +191,24 @@ check("paused says so",
   Status.sentence(withState({ automatic: false })).indexOf("Paused") === 0);
 check("paused outranks the room",
   Status.sentence(withState({ automatic: false, ambientDelta: -0.9 })).indexOf("dark") === -1);
-check("override explains itself",
-  Status.sentence(withState({ manualOverride: true })).indexOf("by hand") !== -1);
+check("what was learned is said out loud",
+  Status.sentence(withState({ phaseKey: "night", learnedOffset: -12 }))
+    .indexOf("You keep nights 12% dimmer") !== -1);
+check("the direction of learning is reported",
+  Status.sentence(withState({ phaseKey: "day", learnedOffset: 8 }))
+    .indexOf("days 8% brighter") !== -1);
+check("nothing learned adds no clause",
+  Status.sentence(withState({ phaseKey: "night", learnedOffset: 0 }))
+    .indexOf("You keep") === -1);
+check("rounding is not reported as a preference",
+  Status.sentence(withState({ phaseKey: "night", learnedOffset: 0.4 }))
+    .indexOf("You keep") === -1);
+check("learning is not claimed without a sun angle",
+  Status.sentence(withState({ phaseKey: "", learnedOffset: -12 }))
+    .indexOf("You keep") === -1);
+check("paused says nothing about learning",
+  Status.sentence(withState({ automatic: false, phaseKey: "night", learnedOffset: -12 }))
+    .indexOf("You keep") === -1);
 check("no location outranks everything",
   Status.sentence(withState({ hasLocation: false, automatic: false })).indexOf("no sun to follow") !== -1);
 check("no location quotes the reason",

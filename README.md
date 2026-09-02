@@ -85,19 +85,30 @@ because being left in the dark when you walk into sunlight is a usability
 failure while a cloud briefly dimming the room is not. A deadband stops the
 plugin writing at all for changes too small to see.
 
-**5. The slider and the keys are different things.** The popup's **Overall**
-slider is a standing preference: it shifts the whole curve, and the sun never
-takes it back. The brightness keys are a temporary override on top of that,
-held until the schedule has moved somewhere clearly different — so an
-afternoon override survives the afternoon and is released by the evening ramp.
-Switching the plugin off stops it writing entirely, and switching it back on
-takes control immediately.
+**5. Adjusting it teaches it.** There is no override to wait out. The sun's
+position falls into four bands — day, golden hour, dusk, night — and each
+carries its own offset from the schedule. Dimming at midnight teaches the night
+and leaves the afternoon exactly where it was.
 
-**6. Manual overrides are detected exactly.** The backlight sysfs value is
-compared against the last value this plugin wrote, so reaching for the
-brightness keys is unambiguous — no threshold to tune, no polling race. Control
-resumes once the schedule has moved somewhere clearly different from where you
-set it, or immediately from the popup.
+The adjustment is absorbed whole, not blended. That is the load-bearing
+decision: learning only half the difference would leave the screen still moving
+after you had stopped adjusting it, which is the fighting the whole design
+exists to prevent. Halfway is the one setting worse than either end.
+
+**6. Adjustments are attributed exactly.** The backlight sysfs value is compared
+against the last value this plugin wrote, so reaching for the brightness keys is
+unambiguous — no threshold to tune. Two races make that harder than it sounds:
+a read issued before one of our own writes can arrive after it, so reads are
+stamped with a write epoch and ignored if the ground moved underneath them.
+Without that the plugin learns from its own writes and drifts a little further
+on every adjustment.
+
+Because absorption is exact, there is no settle timer. Every other
+implementation of this needs one — they poll a value they cannot attribute, so
+they pause a few seconds and hope you have finished. Here the target lands on
+your value, so there is nothing to correct and no window to wait out. Holding a
+brightness key just teaches the same band repeatedly, converging wherever you
+let go.
 
 ## Cost
 
@@ -142,21 +153,30 @@ bin/ab-probe | jq
 
 ## The panel
 
-Two controls: an on/off toggle, and one **Overall** slider from dimmer to
-brighter. Above them, a sentence — *"Following the sun in Skopje. Your room is
-dark, so it's dimmer than usual."*
+The bar icon is the whole feature:
 
-An earlier version led with three stat cards reporting sun elevation in
-degrees, raw lux, and a target percentage, then offered the toggle, two curve
-anchors and a three-way sensor strength. That is a readout of the controller's
-internals; it existed because it was useful to the person writing the
-controller. Someone opening a brightness panel is asking "why is my screen like
-this, and how do I change it", and that is a sentence and a slider.
+| | |
+|---|---|
+| **Click** | on / off. Dimmed means off, exactly like Night Light and DND |
+| **Scroll** | brighter or dimmer, 5% a notch — and it remembers, for this time of day |
+| **Right-click** | the popup |
 
-The **Overall** slider is a standing preference. The brightness keys still work
-and still give a temporary override on top of it; the difference is that this
-one persists. Dragging it previews the resulting brightness on the screen while
-you hold it.
+The popup holds no control the icon does not. It answers one question —
+*"Following the sun in Skopje. Your room is dark, so it's dimmer than usual.
+You keep nights 12% dimmer than the schedule."* — and offers to forget what it
+has learned.
+
+This is the third pass. The first led with three stat cards reporting sun
+elevation in degrees, raw lux and a target percentage, then a toggle, two curve
+anchors and a three-way sensor strength: a readout of the controller's
+internals, useful to the person writing the controller and to nobody else. The
+second cut it to a toggle and an offset slider. The slider is gone now too —
+scrolling does the same job where you are already looking, and unlike a slider
+it knows which time of day it is being asked about.
+
+Learning that cannot be seen is what people mean when they call an adaptive
+backlight haunted, so the sentence names what was learned and the button takes
+it back.
 
 `dayBrightness`, `nightBrightness` and `ambientGain` remain settings — they are
 simply not controls. Edit them in `shell.json` if the defaults are wrong for
@@ -174,8 +194,10 @@ shell's storage rules. All are editable from the popup.
 | `nightBrightness` | `25` | Flat brightness after civil twilight |
 | `ambientGain` | sensor: `30`, none: `0` | How far room light may pull away from the sun curve |
 | `offsetPercent` | `0` | A flat shift applied to the whole curve |
+| `learned` | all zero | Per-band offsets, written by adjusting. Not hand-edited |
 
-`offsetPercent` is the popup's **Overall** slider. The other three have no
+`learned` is maintained by scrolling the icon or pressing the brightness keys;
+the popup's Forget button clears it. The others have no
 control; they are defaults that are right for most people and editable here for
 everyone else.
 
@@ -183,7 +205,8 @@ everyone else.
 
 ```sh
 omarchy-shell kokd.sundial-backend status | jq
-omarchy-shell kokd.sundial-backend resume
+omarchy-shell kokd.sundial-backend forget      # discard what it has learned
+omarchy-shell kokd.sundial-backend nudge 5    # as if you scrolled the icon
 omarchy-shell kokd.sundial-backend refresh
 
 omarchy-shell kokd.sundial toggle    # the popup itself
@@ -224,8 +247,9 @@ way to lose an hour on this plugin.
 
 ## Roadmap
 
-- Learned manual overrides: a per-lux-decade offset table so a correction in a
-  given lighting condition persists, rather than merely pausing.
+- Learning keyed on room light as well as sun position, so a correction made
+  with the blinds shut is not applied when they are open. Solar band alone was
+  the right first cut because it exists on every machine, sensor or not.
 - Adaptive colour temperature on the same elevation curve, and True Tone-style
   white point from the colour sensor where one exists. Held back because
   `omarchy.nightlight` already owns `hyprsunset` and two writers would fight

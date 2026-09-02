@@ -8,14 +8,19 @@ import "lib/Status.js" as Status
 // surface (one per monitor) reads the same state, so a second display cannot
 // start a second controller.
 //
-// Two controls, deliberately. An earlier version led with three stat cards
-// reporting sun elevation, raw lux, and a target percentage, then offered a
-// toggle, two curve anchors and a three-way sensor strength. That is a readout
-// of the controller's internals, and it was built because it was useful to the
-// person writing the controller. Someone opening a brightness panel is asking
-// "why is my screen like this, and how do I change it" — which is a sentence
-// and a slider. The curve anchors and sensor strength still exist as settings
-// in shell.json for anyone who wants them.
+// The bar icon carries the whole feature, the way the first-party toggles do:
+// press to turn it on or off, scroll to adjust. The popup is on the right
+// button, and holds no control the icon does not — just the reason the screen
+// looks the way it does, and a way to undo what the plugin has learned.
+//
+// This is the third pass. The first was three stat cards, a toggle, two curve
+// anchors and a sensor strength — a readout of the controller's internals,
+// built because it was useful to the person writing the controller. The second
+// cut that to a toggle and an offset slider. The slider is gone now too:
+// scrolling the icon does the same job in the place the user is already
+// looking, and unlike a slider it knows which time of day it is being asked
+// about. The curve anchors and sensor strength still exist as settings in
+// shell.json for anyone who wants them.
 Panel {
   id: root
   moduleName: "kokd.sundial"
@@ -23,8 +28,11 @@ Panel {
 
   readonly property var backend: bar && bar.shell ? bar.shell.serviceFor(moduleName) : null
   readonly property bool automatic: backend ? backend.automatic : false
-  readonly property bool manualOverride: backend ? backend.manualOverride : false
   readonly property bool hasSensor: backend ? backend.hasSensor : false
+  readonly property string phaseKey: backend ? backend.phaseKey : ""
+  readonly property real learnedOffset: backend ? backend.learnedOffset : 0
+  readonly property bool hasLearned: backend ? backend.hasLearned : false
+  property real wheelAccumulator: 0
   readonly property bool ambientActive: backend ? backend.ambientActive : false
   readonly property real ambientDelta: backend ? backend.ambientDelta : 0
   readonly property int current: backend ? backend.current : 0
@@ -45,8 +53,9 @@ Panel {
     locationError: root.locationError,
     locationName: root.locationName,
     automatic: root.automatic,
-    manualOverride: root.manualOverride,
     hasSensor: root.hasSensor,
+    phaseKey: root.phaseKey,
+    learnedOffset: root.learnedOffset,
     ambientActive: root.ambientActive,
     ambientDelta: root.ambientDelta
   })
@@ -56,6 +65,11 @@ Panel {
   function persistSetting(key, value) {
     persistQueue.push([key, value])
     runPersistQueue()
+  }
+
+  function showBrightnessOsd(percent) {
+    if (!bar || !bar.shell) return
+    bar.shell.summon("omarchy.osd", JSON.stringify({ icon: "brightness", value: percent }))
   }
 
   function runPersistQueue() {
@@ -83,31 +97,45 @@ Panel {
     bar: root.bar
     text: root.automatic ? "󰃠" : "󰃞"
 
-    // Three states, three appearances, following the house style set by the
-    // first-party toggles (Night Light, DND, Stay Awake): those set
-    // useActiveColor: false and dimmed: !active, so off reads as dimmed and
-    // never as the accent. An earlier version had this backwards — off was
-    // painted in bar.active, the theme's attention colour, so a switched-off
-    // plugin was the loudest thing in the bar while a working one was plain.
+    // Two states now, matching the house style set by the first-party toggles
+    // (Night Light, DND, Stay Awake), which set useActiveColor: false and
+    // dimmed: !active so that off reads as dimmed and never as the accent:
     //
     //   off                 dimmed, plain colour
     //   on                  full, plain colour
-    //   on + override       full, attention colour
     //
-    // The override keeps the accent because it is the one state that really is
-    // calling attention to itself: the plugin is on but deliberately not
-    // following the schedule, and nothing else would say so.
+    // There was a third — the accent for an active manual override — which is
+    // gone with the override itself. Nothing about this plugin is urgent, and
+    // the accent is reserved for things that are (recording, alerts).
     dimmed: !root.automatic
-    active: root.manualOverride
     tooltipText: root.automatic
       ? "Sundial · " + root.current + "% · " + root.phase
         + " (sun " + root.elevationText + ")"
-      : "Sundial paused"
+        + "\nScroll to adjust · right-click for details"
+      : "Sundial paused\nClick to resume"
+
+    // Left is the feature, which is the same bargain the rest of the row makes:
+    // one press does the thing, and the popup is somewhere else. An earlier
+    // version had these the other way round, so the common action was buried
+    // behind a panel and the rare one was a click away.
     onPressed: function(mouseButton) {
       if (mouseButton === Qt.RightButton)
-        root.persistSetting("automatic", !root.automatic)
-      else
         root.toggle()
+      else
+        root.persistSetting("automatic", !root.automatic)
+    }
+
+    // Five points a notch, matching the first-party Monitor widget, so the
+    // scroll behaves the same over either icon. It teaches as it goes: what
+    // this sets becomes the preference for this time of day.
+    onWheelMoved: function(delta) {
+      if (!root.backend) return
+      var wheel = Util.wheelSteps(root.wheelAccumulator, delta)
+      root.wheelAccumulator = wheel.remainder
+      if (wheel.steps === 0) return
+      root.backend.nudge(wheel.steps * 5)
+      root.showBrightnessOsd(root.backend.nudgeIntent >= 0
+        ? root.backend.nudgeIntent : root.current)
     }
   }
 
@@ -205,93 +233,20 @@ Panel {
           onClicked: root.persistSetting("automatic", !root.automatic)
         }
 
+        // Offered only when there is something to undo. Learning that cannot
+        // be inspected or reversed is the thing people mean when they call an
+        // adaptive backlight haunted; the status sentence above names what was
+        // learned, and this takes it back.
         Button {
-          visible: root.manualOverride && root.automatic
+          visible: root.hasLearned
           enabled: root.backend !== null
           width: parent.width
-          text: "Resume automatic control"
+          text: "Forget what I taught it"
           iconText: "󰑐"
           foreground: root.barForeground
           fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
           bordered: true
-          onClicked: if (root.backend) root.backend.resume()
-        }
-
-        PanelSeparator { foreground: root.barForeground }
-
-        // One standing preference. The brightness keys still give a temporary
-        // override on top of this; the difference is that this one persists.
-        Column {
-          width: parent.width
-          spacing: Style.space(6)
-
-          Item {
-            width: parent.width
-            implicitHeight: Math.max(offsetTitle.implicitHeight, offsetValue.implicitHeight)
-            PanelSectionHeader {
-              id: offsetTitle
-              text: "OVERALL"
-              foreground: root.barForeground
-              fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
-              anchors.left: parent.left
-              anchors.verticalCenter: parent.verticalCenter
-            }
-            Text {
-              id: offsetValue
-              readonly property int shown: offsetSlider.dragging
-                ? Math.round(offsetSlider.liveValue) : root.offsetPercent
-              text: (shown > 0 ? "+" : "") + shown + "%"
-              color: Qt.darker(root.barForeground, 1.4)
-              font.family: root.bar ? root.bar.fontFamily : Style.font.family
-              font.pixelSize: Style.font.caption
-              font.bold: true
-              anchors.right: parent.right
-              anchors.rightMargin: Style.space(6)
-              anchors.verticalCenter: parent.verticalCenter
-            }
-          }
-
-          PanelSlider {
-            id: offsetSlider
-            width: parent.width
-            bar: root.bar
-            minimum: -30
-            maximum: 30
-            step: 1
-            integer: true
-            tickCount: 7
-            value: root.offsetPercent
-            enabled: root.backend !== null
-            // Dragging shows the brightness the offset produces, so the control
-            // demonstrates its own effect instead of describing it.
-            onMoved: function(value) {
-              if (root.backend) root.backend.previewOffset(Math.round(value))
-            }
-            onReleased: function(value) {
-              root.persistSetting("offsetPercent", Math.round(value))
-              if (root.backend) root.backend.endPreview()
-            }
-          }
-
-          Item {
-            width: parent.width
-            implicitHeight: dimmerLabel.implicitHeight
-            Text {
-              id: dimmerLabel
-              text: "Dimmer"
-              color: Qt.darker(root.barForeground, 1.4)
-              font.family: root.bar ? root.bar.fontFamily : Style.font.family
-              font.pixelSize: Style.font.caption
-              anchors.left: parent.left
-            }
-            Text {
-              text: "Brighter"
-              color: Qt.darker(root.barForeground, 1.4)
-              font.family: root.bar ? root.bar.fontFamily : Style.font.family
-              font.pixelSize: Style.font.caption
-              anchors.right: parent.right
-            }
-          }
+          onClicked: if (root.backend) root.backend.forget()
         }
       }
     }

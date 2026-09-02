@@ -72,14 +72,39 @@ Item {
   property int target: 0
   property int pendingWrite: -1
   property bool previewing: false
-  property bool manualOverride: false
-  property int overrideTarget: 0
   property bool probeReady: false
   property string error: ""
 
+  // What the user has taught this plugin, one offset per solar band. See the
+  // learning section of lib/Curve.js for why an adjustment is kept rather than
+  // expired, and why it is absorbed whole rather than blended.
+  property var learned: Curve.forgetLearned()
+  readonly property string phaseKey: Solar.phaseKey(elevation)
+  readonly property real learnedOffset: Curve.learnedOffset(learned, phaseKey)
+  readonly property bool hasLearned: Curve.hasLearned(learned)
+
+  // Carries a scroll burst. Each notch has to build on the previous one, and
+  // `current` lags behind by a sysfs round trip, so reading it mid-burst would
+  // make every notch after the first a no-op.
+  property int nudgeIntent: -1
+
+  // Attribution epoch. A backlight read is only evidence of who moved the
+  // screen if no write of ours completed while it was in flight: FileView
+  // reloads asynchronously, so a read requested before a write can arrive
+  // after it, carrying the pre-write value against a post-write
+  // lastWrittenRaw. That difference looks exactly like a user pressing a
+  // brightness key, and gets absorbed as one -- the plugin teaching itself
+  // from its own writes, drifting a little further on every nudge.
+  //
+  // The running flag alone does not cover it; the process can exit inside the
+  // window. Comparing the counter at request time against the counter at
+  // delivery does, because it asks the only question that matters: did the
+  // ground move under this reading?
+  property int writeEpoch: 0
+  property int readEpoch: -1
+
   readonly property int deadband: 3
   readonly property int sampleWindow: 5
-  readonly property int resumeThreshold: 15
 
   // ------------------------------------------------------------- settings
   //
@@ -115,12 +140,16 @@ Item {
     var settings = currentSettings()
     var wasAutomatic = automatic
     automatic = settings.automatic === undefined ? true : settings.automatic === true
-    if (automatic && !wasAutomatic) resume()
+    // Taking over again starts from wherever the screen is now. Anything the
+    // user did while it was paused was them driving, not them correcting the
+    // schedule, so it adopts that value instead of learning from it.
+    if (automatic && !wasAutomatic) adopt()
     dayBrightness = clampSetting(settings.dayBrightness, 10, 100, 85)
     nightBrightness = clampSetting(settings.nightBrightness, 1, 100, 25)
     ambientGainExplicit = settings.ambientGain === undefined || settings.ambientGain === null
       ? -1 : clampSetting(settings.ambientGain, 0, 60, 0)
     offsetPercent = clampSetting(settings.offsetPercent, -30, 30, 0)
+    learned = Curve.learnedTable(settings.learned)
     settingsReady = true
     evaluate()
   }
@@ -131,6 +160,7 @@ Item {
       nightBrightness: nightBrightness,
       ambientGain: ambientGain,
       offsetPercent: offsetPercent,
+      learnedOffset: learnedOffset,
       minBrightness: 5,
       maxBrightness: 100
     }
@@ -160,15 +190,6 @@ Item {
     target = Curve.target(elevation, ambientGain > 0 ? lux : null, curveSettings())
 
     if (!automatic) return
-
-    // A manual override stands until the schedule has moved somewhere clearly
-    // different from where the user made it. This sits below the automatic
-    // check on purpose: an override is only meaningful while there is a
-    // schedule to override.
-    if (manualOverride) {
-      if (!Curve.overrideExpired(target, overrideTarget, resumeThreshold)) return
-      resume()
-    }
 
     // No location means no schedule. The curve's own fallback is daytime
     // brightness, which is the right answer for a missing reading mid-run but
@@ -233,19 +254,98 @@ Item {
     // reaching for the brightness keys. Comparing against the last value
     // written here detects that exactly, with no polling race and no
     // threshold to tune.
-    if (automatic && lastWrittenRaw >= 0 && raw !== lastWrittenRaw
-        && !writeProcess.running && !manualOverride) {
-      manualOverride = true
-      overrideTarget = target
-    }
+    var manual = automatic && lastWrittenRaw >= 0 && raw !== lastWrittenRaw
+      && !writeProcess.running && readEpoch === writeEpoch
 
     currentRaw = raw
     if (lastWrittenRaw < 0) lastWrittenRaw = raw
+
+    if (manual) absorb()
   }
 
-  function resume() {
-    manualOverride = false
+  // Take the user's brightness as the truth for this solar band.
+  //
+  // No settle timer, which every other implementation of this needs: theirs
+  // poll a value they cannot attribute, so they pause for a fixed few seconds
+  // and hope the user has finished. Here the comparison against lastWrittenRaw
+  // says exactly who moved the backlight, and absorbing the difference leaves
+  // the target equal to the user's value -- so the loop has nothing to correct
+  // and there is no window to wait out. Holding a brightness key just teaches
+  // the same band repeatedly, converging on wherever the key stops.
+  function absorb() {
+    var key = phaseKey
+    if (key === "") return
+
+    var residual = current - target
+    if (Math.abs(residual) < 1) return
+
+    learned = Curve.learn(learned, key, residual)
+    // The user's value is now this plugin's value; without this the next read
+    // would look like a second manual change and learn the same delta twice.
     lastWrittenRaw = currentRaw
+    settleTimer.restart()
+  }
+
+  // Adopt the current brightness without learning from it.
+  function adopt() {
+    lastWrittenRaw = currentRaw
+    nudgeIntent = -1
+  }
+
+  // Scrolling the bar icon. Same effect as the brightness keys, minus the
+  // round trip through sysfs: this writes and teaches in one go, so a notch
+  // lands immediately instead of waiting for the next poll to notice it.
+  function nudge(deltaPercent) {
+    if (!probeReady || maxRaw <= 0 || backlightDevice === "") return
+
+    var step = Math.round(Number(deltaPercent) || 0)
+    if (step === 0) return
+
+    var from = nudgeIntent >= 0 ? nudgeIntent : current
+    var next = Math.max(5, Math.min(100, from + step))
+    if (next === from && nudgeIntent >= 0) return
+
+    nudgeIntent = next
+    write(next)
+
+    // Paused means the user is driving, so a scroll is just brightness.
+    if (!automatic || phaseKey === "") return
+
+    var residual = next - target
+    if (Math.abs(residual) >= 1) learned = Curve.learn(learned, phaseKey, residual)
+    settleTimer.restart()
+  }
+
+  function forget() {
+    learned = Curve.forgetLearned()
+    persistLearned()
+    evaluate()
+  }
+
+  // shell.json is the only store, per the shell's plugin rules, and writing it
+  // costs a subprocess -- so a scroll burst coalesces into one write after the
+  // wheel stops rather than one per notch.
+  function persistLearned() {
+    persistProcess.command = [
+      "omarchy-shell", "shell", "setBarWidget", pluginId,
+      "learned", JSON.stringify(learned), "{}"
+    ]
+    persistProcess.running = true
+  }
+
+  Timer {
+    id: settleTimer
+    interval: 400
+    repeat: false
+    onTriggered: {
+      root.nudgeIntent = -1
+      root.persistLearned()
+    }
+  }
+
+  Process {
+    id: persistProcess
+    stdout: StdioCollector { waitForEnd: true }
   }
 
   function tick() {
@@ -259,8 +359,12 @@ Item {
     // real reading finally arrived. The effect was that brightness keys were
     // invisible for as long as the plugin was ramping, and only worked once it
     // had settled. Deciding after the read closes that window.
-    if (backlightDevice === "") evaluate()
-    else backlightFile.reload()
+    if (backlightDevice === "") {
+      evaluate()
+    } else {
+      readEpoch = writeEpoch
+      backlightFile.reload()
+    }
   }
 
   // -------------------------------------------------------------- sources
@@ -286,12 +390,15 @@ Item {
 
   Process {
     id: writeProcess
-    onExited: if (root.pendingWrite >= 0) {
-      var raw = root.pendingWrite
-      root.pendingWrite = -1
-      root.lastWrittenRaw = raw
-      command = ["brightnessctl", "-d", root.backlightDevice, "-q", "set", String(raw)]
-      running = true
+    onExited: {
+      root.writeEpoch += 1
+      if (root.pendingWrite >= 0) {
+        var raw = root.pendingWrite
+        root.pendingWrite = -1
+        root.lastWrittenRaw = raw
+        command = ["brightnessctl", "-d", root.backlightDevice, "-q", "set", String(raw)]
+        running = true
+      }
     }
   }
 
@@ -396,20 +503,27 @@ Item {
         sensor: root.sensorKind,
         current: root.current,
         target: root.target,
-        manualOverride: root.manualOverride,
         previewing: root.previewing,
         locationError: root.locationError,
         ambientGain: root.ambientGain,
         offsetPercent: root.offsetPercent,
+        learned: root.learned,
+        learnedOffset: root.learnedOffset,
+        phaseKey: root.phaseKey,
         error: root.error
       })
     }
 
     function refresh(): void { root.tick() }
 
-    function resume(): string {
-      root.resume()
-      return "resumed"
+    function forget(): string {
+      root.forget()
+      return "forgot everything it had learned"
+    }
+
+    function nudge(step: string): string {
+      root.nudge(Number(step))
+      return String(root.current)
     }
   }
 }
