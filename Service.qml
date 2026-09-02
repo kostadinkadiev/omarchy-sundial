@@ -88,18 +88,13 @@ Item {
   readonly property real learnedOffset: Curve.learnedOffset(learned, phaseKey)
   readonly property bool hasLearned: Curve.hasLearned(learned)
 
-  // Carries a scroll burst. Each notch has to build on the previous one, and
-  // `current` lags behind by a sysfs round trip, so reading it mid-burst would
-  // make every notch after the first a no-op.
-  property int nudgeIntent: -1
-
   // Attribution epoch. A backlight read is only evidence of who moved the
   // screen if no write of ours completed while it was in flight: FileView
   // reloads asynchronously, so a read requested before a write can arrive
   // after it, carrying the pre-write value against a post-write
   // lastWrittenRaw. That difference looks exactly like a user pressing a
   // brightness key, and gets absorbed as one -- the plugin teaching itself
-  // from its own writes, drifting a little further on every nudge.
+  // from its own writes, drifting a little further on every adjustment.
   //
   // The running flag alone does not cover it; the process can exit inside the
   // window. Comparing the counter at request time against the counter at
@@ -317,31 +312,6 @@ Item {
   // Adopt the current brightness without learning from it.
   function adopt() {
     lastWrittenRaw = currentRaw
-    nudgeIntent = -1
-  }
-
-  // Scrolling the bar icon. Same effect as the brightness keys, minus the
-  // round trip through sysfs: this writes and teaches in one go, so a notch
-  // lands immediately instead of waiting for the next poll to notice it.
-  function nudge(deltaPercent) {
-    if (!probeReady || maxRaw <= 0 || backlightDevice === "") return
-
-    var step = Math.round(Number(deltaPercent) || 0)
-    if (step === 0) return
-
-    var from = nudgeIntent >= 0 ? nudgeIntent : current
-    var next = Math.max(5, Math.min(100, from + step))
-    if (next === from && nudgeIntent >= 0) return
-
-    nudgeIntent = next
-    write(next)
-
-    // Paused means the user is driving, so a scroll is just brightness.
-    if (!automatic || phaseKey === "") return
-
-    var residual = next - target
-    if (Math.abs(residual) >= 1) learned = Curve.learn(learned, phaseKey, residual)
-    settleTimer.restart()
   }
 
   function forget() {
@@ -351,8 +321,8 @@ Item {
   }
 
   // shell.json is the only store, per the shell's plugin rules, and writing it
-  // costs a subprocess -- so a scroll burst coalesces into one write after the
-  // wheel stops rather than one per notch.
+  // costs a subprocess -- so a held brightness key, which absorbs afresh on
+  // every poll, coalesces into one write after the key comes up.
   function persistLearned() {
     persistProcess.command = [
       "omarchy-shell", "shell", "setBarWidget", pluginId,
@@ -363,12 +333,9 @@ Item {
 
   Timer {
     id: settleTimer
-    interval: 400
+    interval: 2500
     repeat: false
-    onTriggered: {
-      root.nudgeIntent = -1
-      root.persistLearned()
-    }
+    onTriggered: root.persistLearned()
   }
 
   Process {
@@ -553,9 +520,5 @@ Item {
       return "forgot everything it had learned"
     }
 
-    function nudge(step: string): string {
-      root.nudge(Number(step))
-      return String(root.current)
-    }
   }
 }

@@ -158,13 +158,20 @@ The bar icon is the whole feature:
 | | |
 |---|---|
 | **Click** | on / off. Dimmed means off, exactly like Night Light and DND |
-| **Scroll** | brighter or dimmer, 5% a notch — and it remembers, for this time of day |
 | **Right-click** | the popup |
+
+Adjusting is the brightness keys, or the Monitor widget's scroll — both write
+the backlight through `brightnessctl`, which is what this watches. There is no
+control of its own for that, and briefly there was: a scroll handler on this
+icon. It turned out to duplicate a gesture already sitting five icons along on
+the same bar, on the widget whose actual job is brightness, and to arrive at
+learning by a second path when the first cannot be removed anyway.
 
 Hovering gives the state and the next thing the sun will do:
 
 ```
 Sundial · 28% · night · sunrise 06:01
+Right-click for details
 ```
 
 That last field used to be the sun's elevation in degrees — `sun -23.9°` —
@@ -183,8 +190,8 @@ elevation in degrees, raw lux and a target percentage, then a toggle, two curve
 anchors and a three-way sensor strength: a readout of the controller's
 internals, useful to the person writing the controller and to nobody else. The
 second cut it to a toggle and an offset slider. The slider is gone now too —
-scrolling does the same job where you are already looking, and unlike a slider
-it knows which time of day it is being asked about.
+the brightness keys already do that job, and unlike a slider they land in a
+band the plugin can attribute to a time of day.
 
 Learning that cannot be seen is what people mean when they call an adaptive
 backlight haunted, so the sentence names what was learned and the button takes
@@ -208,7 +215,7 @@ shell's storage rules. All are editable from the popup.
 | `offsetPercent` | `0` | A flat shift applied to the whole curve |
 | `learned` | all zero | Per-band offsets, written by adjusting. Not hand-edited |
 
-`learned` is maintained by scrolling the icon or pressing the brightness keys;
+`learned` is maintained by pressing the brightness keys;
 the popup's Forget button clears it. The others have no
 control; they are defaults that are right for most people and editable here for
 everyone else.
@@ -217,8 +224,7 @@ everyone else.
 
 ```sh
 omarchy-shell kokd.sundial-backend status | jq
-omarchy-shell kokd.sundial-backend forget      # discard what it has learned
-omarchy-shell kokd.sundial-backend nudge 5    # as if you scrolled the icon
+omarchy-shell kokd.sundial-backend forget     # discard what it has learned
 omarchy-shell kokd.sundial-backend refresh
 
 omarchy-shell kokd.sundial toggle    # the popup itself

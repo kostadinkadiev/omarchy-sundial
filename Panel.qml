@@ -9,18 +9,24 @@ import "lib/Status.js" as Status
 // start a second controller.
 //
 // The bar icon carries the whole feature, the way the first-party toggles do:
-// press to turn it on or off, scroll to adjust. The popup is on the right
-// button, and holds no control the icon does not — just the reason the screen
-// looks the way it does, and a way to undo what the plugin has learned.
+// press to turn it on or off. The popup is on the right button, and holds no
+// control the icon does not — just the reason the screen looks the way it does,
+// and a way to undo what the plugin has learned.
+//
+// There is nothing here for adjusting brightness, deliberately. The brightness
+// keys and the first-party Monitor widget both write the backlight through
+// brightnessctl, which is exactly what the service watches, so both already
+// teach it without this file being involved. A scroll handler lived here
+// briefly and was removed: it duplicated a gesture five icons along on the same
+// bar, on the widget whose actual job is brightness, and added a second route
+// into learning when the first cannot be removed anyway.
 //
 // This is the third pass. The first was three stat cards, a toggle, two curve
 // anchors and a sensor strength — a readout of the controller's internals,
 // built because it was useful to the person writing the controller. The second
-// cut that to a toggle and an offset slider. The slider is gone now too:
-// scrolling the icon does the same job in the place the user is already
-// looking, and unlike a slider it knows which time of day it is being asked
-// about. The curve anchors and sensor strength still exist as settings in
-// shell.json for anyone who wants them.
+// cut that to a toggle and an offset slider. The slider is gone now too, for
+// the reason above. The curve anchors and sensor strength still exist as
+// settings in shell.json for anyone who wants them.
 Panel {
   id: root
   moduleName: "kokd.sundial"
@@ -32,7 +38,6 @@ Panel {
   readonly property string phaseKey: backend ? backend.phaseKey : ""
   readonly property real learnedOffset: backend ? backend.learnedOffset : 0
   readonly property bool hasLearned: backend ? backend.hasLearned : false
-  property real wheelAccumulator: 0
   readonly property bool ambientActive: backend ? backend.ambientActive : false
   readonly property real ambientDelta: backend ? backend.ambientDelta : 0
   readonly property int current: backend ? backend.current : 0
@@ -97,11 +102,6 @@ Panel {
     runPersistQueue()
   }
 
-  function showBrightnessOsd(percent) {
-    if (!bar || !bar.shell) return
-    bar.shell.summon("omarchy.osd", JSON.stringify({ icon: "brightness", value: percent }))
-  }
-
   function runPersistQueue() {
     if (persistProc.running || persistQueue.length === 0 || !moduleName) return
     var item = persistQueue.shift()
@@ -141,7 +141,7 @@ Panel {
     tooltipText: root.automatic
       ? "Sundial · " + root.current + "% · " + root.phase
         + (root.sunEventText ? " · " + root.sunEventText : "")
-        + "\nScroll to adjust · right-click for details"
+        + "\nRight-click for details"
       : "Sundial paused\nClick to resume"
 
     // Left is the feature, which is the same bargain the rest of the row makes:
@@ -153,19 +153,6 @@ Panel {
         root.toggle()
       else
         root.persistSetting("automatic", !root.automatic)
-    }
-
-    // Five points a notch, matching the first-party Monitor widget, so the
-    // scroll behaves the same over either icon. It teaches as it goes: what
-    // this sets becomes the preference for this time of day.
-    onWheelMoved: function(delta) {
-      if (!root.backend) return
-      var wheel = Util.wheelSteps(root.wheelAccumulator, delta)
-      root.wheelAccumulator = wheel.remainder
-      if (wheel.steps === 0) return
-      root.backend.nudge(wheel.steps * 5)
-      root.showBrightnessOsd(root.backend.nudgeIntent >= 0
-        ? root.backend.nudgeIntent : root.current)
     }
   }
 
