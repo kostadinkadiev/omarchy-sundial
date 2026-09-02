@@ -285,8 +285,13 @@ Item {
 
   Component.onCompleted: probeProcess.running = true
 
+  // IPC targets are registered globally in the single long-lived omarchy-shell
+  // process, shared with every other plugin the user has installed, so this is
+  // namespaced for the same reason the plugin id is. `-backend` distinguishes
+  // it from the bar widget's own target, which the Panel base registers as the
+  // plugin id to route summon/toggle.
   IpcHandler {
-    target: "adaptive-brightness"
+    target: "kokd.adaptive-brightness-backend"
 
     function status(): string {
       return JSON.stringify({

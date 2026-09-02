@@ -28,6 +28,20 @@ the sun curve is the whole schedule there.
 omarchy plugin add https://github.com/kostadinkadiev/omarchy-adaptive-brightness.git --enable
 ```
 
+The repository is `omarchy-adaptive-brightness`; the plugin id is
+`kokd.adaptive-brightness`. That is deliberate, not a mismatch. `omarchy plugin
+add` reads the id out of the manifest and installs to
+`~/.config/omarchy/plugins/<id>/`, so the repo name is only ever the thing you
+paste once — every command afterwards takes the id:
+
+```sh
+omarchy plugin update kokd.adaptive-brightness
+omarchy plugin remove kokd.adaptive-brightness
+```
+
+The id carries an author prefix because ids are unique across every plugin a
+user has installed, and `omarchy plugin add` refuses one that is already taken.
+
 ## How it decides
 
 **1. Solar elevation, not wall-clock time.** A low-precision NOAA solar
@@ -107,10 +121,15 @@ shell's storage rules. All are editable from the popup.
 ## IPC
 
 ```sh
-omarchy-shell adaptive-brightness status | jq
-omarchy-shell adaptive-brightness resume
-omarchy-shell adaptive-brightness refresh
+omarchy-shell kokd.adaptive-brightness-backend status | jq
+omarchy-shell kokd.adaptive-brightness-backend resume
+omarchy-shell kokd.adaptive-brightness-backend refresh
+
+omarchy-shell kokd.adaptive-brightness toggle    # the popup itself
 ```
+
+Both targets are namespaced because IPC targets are global to the one
+`omarchy-shell` process every installed plugin shares.
 
 ## Development
 
