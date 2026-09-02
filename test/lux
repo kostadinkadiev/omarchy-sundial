@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+# Watch every light sensor on the machine, next to what the plugin makes of it.
+#
+#   test/lux            follow, one line a second
+#   test/lux sweep      drive the backlight 5 -> 100% and record lux at each
+#                       step, which is how you find out whether the sensor is
+#                       reading the room or reading the screen
+#
+# Readings are raw x in_illuminance_scale, the same arithmetic lib/Sensor.js
+# does, so a disagreement with the plugin is a bug in one of them.
+
+set -uo pipefail
+
+mapfile -t SENSORS < <(ls -d /sys/bus/iio/devices/iio:device* 2>/dev/null | while read -r d; do
+  [[ -r "$d/in_illuminance_raw" ]] && echo "$d"
+done)
+
+if (( ${#SENSORS[@]} == 0 )); then
+  echo "no illuminance sensors found" >&2
+  exit 1
+fi
+
+read_lux() {
+  local dir="$1" raw scale offset
+  raw=$(cat "$dir/in_illuminance_raw" 2>/dev/null || echo 0)
+  scale=$(cat "$dir/in_illuminance_scale" 2>/dev/null || echo 1)
+  offset=$(cat "$dir/in_illuminance_offset" 2>/dev/null || echo 0)
+  awk -v r="$raw" -v s="$scale" -v o="$offset" 'BEGIN { printf "%.2f", (r + o) * s }'
+}
+
+header() {
+  printf '%-11s' "backlight"
+  for d in "${SENSORS[@]}"; do printf '%-14s' "$(basename "$d" | sed s/iio://)/$(cat "$d/name" 2>/dev/null)"; done
+  printf '%-9s%s\n' "plugin" "target"
+}
+
+row() {
+  local pct="$1" status
+  status=$(omarchy-shell kokd.sundial-backend status 2>/dev/null)
+  printf '%-11s' "${pct}%"
+  for d in "${SENSORS[@]}"; do printf '%-14s' "$(read_lux "$d")"; done
+  printf '%-9s%s\n' \
+    "$(jq -r '.lux // "-"' <<<"$status")" \
+    "$(jq -r '.target // "-"' <<<"$status")%"
+}
+
+backlight_percent() {
+  local dev cur max
+  dev=$(basename "$(ls -d /sys/class/backlight/* | head -1)")
+  cur=$(cat "/sys/class/backlight/$dev/brightness")
+  max=$(cat "/sys/class/backlight/$dev/max_brightness")
+  awk -v c="$cur" -v m="$max" 'BEGIN { printf "%d", c * 100 / m }'
+}
+
+if [[ "${1:-follow}" == "sweep" ]]; then
+  echo "Turn the room lights OFF first; this only means anything in the dark."
+  echo "Any lux that tracks the backlight is the screen reflecting into the sensor."
+  echo
+  DEV=$(basename "$(ls -d /sys/class/backlight/* | head -1)")
+  MAX=$(cat "/sys/class/backlight/$DEV/max_brightness")
+  RESTORE=$(cat "/sys/class/backlight/$DEV/brightness")
+  # The plugin would otherwise slew the screen out from under the measurement.
+  WAS=$(omarchy-shell kokd.sundial-backend status | jq -r .automatic)
+  trap 'brightnessctl -d "$DEV" -q set "$RESTORE"; echo; echo "backlight restored"' EXIT INT TERM
+  [[ "$WAS" == "true" ]] && echo "note: plugin is ON and will fight this; pause it first for a clean read"
+  echo
+  header
+  for pct in 5 15 30 50 75 100; do
+    brightnessctl -d "$DEV" -q set "$(( MAX * pct / 100 ))"
+    sleep 3
+    row "$pct"
+  done
+  exit 0
+fi
+
+header
+while true; do
+  row "$(backlight_percent)"
+  sleep 1
+done
