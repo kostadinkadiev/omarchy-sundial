@@ -1,6 +1,6 @@
-# Adaptive Brightness for Omarchy
+# Daylight
 
-Display brightness that follows the sun, and the room.
+Brightness that follows the sun, on any machine.
 
 Most auto-brightness implementations pick one input and live with its failure
 mode. A clock-driven schedule is wrong every time the season or your longitude
@@ -12,6 +12,11 @@ dark room at noon and it still dims.
 
 It works on machines with no light sensor at all — including desktops — because
 the sun curve is the whole schedule there.
+
+Omarchy already has ambient-light plugins, and good ones. What none of them
+have is time: they are pure ALS and require a sensor to do anything. Daylight
+schedules on the sun's position, so it has an opinion about your screen at
+22:00 in December whether or not your laptop can see the room.
 
 ## Requirements
 
@@ -28,18 +33,18 @@ the sun curve is the whole schedule there.
 ## Install
 
 ```sh
-omarchy plugin add https://github.com/kostadinkadiev/omarchy-adaptive-brightness.git --enable
+omarchy plugin add https://github.com/kostadinkadiev/omarchy-daylight.git --enable
 ```
 
-The repository is `omarchy-adaptive-brightness`; the plugin id is
-`kokd.adaptive-brightness`. That is deliberate, not a mismatch. `omarchy plugin
+The repository is `omarchy-daylight`; the plugin id is
+`kokd.daylight`. That is deliberate, not a mismatch. `omarchy plugin
 add` reads the id out of the manifest and installs to
 `~/.config/omarchy/plugins/<id>/`, so the repo name is only ever the thing you
 paste once — every command afterwards takes the id:
 
 ```sh
-omarchy plugin update kokd.adaptive-brightness
-omarchy plugin remove kokd.adaptive-brightness
+omarchy plugin update kokd.daylight
+omarchy plugin remove kokd.daylight
 ```
 
 The id carries an author prefix because ids are unique across every plugin a
@@ -169,11 +174,11 @@ everyone else.
 ## IPC
 
 ```sh
-omarchy-shell kokd.adaptive-brightness-backend status | jq
-omarchy-shell kokd.adaptive-brightness-backend resume
-omarchy-shell kokd.adaptive-brightness-backend refresh
+omarchy-shell kokd.daylight-backend status | jq
+omarchy-shell kokd.daylight-backend resume
+omarchy-shell kokd.daylight-backend refresh
 
-omarchy-shell kokd.adaptive-brightness toggle    # the popup itself
+omarchy-shell kokd.daylight toggle    # the popup itself
 ```
 
 Both targets are namespaced because IPC targets are global to the one

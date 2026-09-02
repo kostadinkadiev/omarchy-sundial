@@ -22,7 +22,7 @@ Item {
   property var shell: null
   property var manifest: null
 
-  readonly property string pluginId: manifest ? String(manifest.id) : "kokd.adaptive-brightness"
+  readonly property string pluginId: manifest ? String(manifest.id) : "kokd.daylight"
 
   // ------------------------------------------------------------- settings
   property bool automatic: true
@@ -32,7 +32,7 @@ Item {
   // shell does not write manifest defaults into shell.json — an untouched
   // widget entry is a bare { "id": ... }. So the default can depend on the
   // hardware: a machine with a light sensor should use it out of the box.
-  // Shipping gain 0 everywhere meant a plugin called Adaptive Brightness
+  // Shipping gain 0 everywhere meant a plugin called Daylight
   // ignored the sensor until the user found a slider and guessed a number.
   property int ambientGainExplicit: -1
   readonly property int ambientGain: ambientGainExplicit >= 0
@@ -370,7 +370,7 @@ Item {
   // it from the bar widget's own target, which the Panel base registers as the
   // plugin id to route summon/toggle.
   IpcHandler {
-    target: "kokd.adaptive-brightness-backend"
+    target: "kokd.daylight-backend"
 
     function status(): string {
       return JSON.stringify({

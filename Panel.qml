@@ -18,8 +18,8 @@ import "lib/Status.js" as Status
 // in shell.json for anyone who wants them.
 Panel {
   id: root
-  moduleName: "kokd.adaptive-brightness"
-  ipcTarget: "kokd.adaptive-brightness"
+  moduleName: "kokd.daylight"
+  ipcTarget: "kokd.daylight"
 
   readonly property var backend: bar && bar.shell ? bar.shell.serviceFor(moduleName) : null
   readonly property bool automatic: backend ? backend.automatic : false
@@ -88,9 +88,9 @@ Panel {
     // paused, or sitting on a manual override, is worth noticing.
     active: !root.automatic || root.manualOverride
     tooltipText: root.automatic
-      ? "Adaptive brightness · " + root.current + "% · " + root.phase
+      ? "Daylight · " + root.current + "% · " + root.phase
         + " (sun " + root.elevationText + ")"
-      : "Adaptive brightness paused"
+      : "Daylight paused"
     onPressed: function(mouseButton) {
       if (mouseButton === Qt.RightButton)
         root.persistSetting("automatic", !root.automatic)
@@ -138,7 +138,7 @@ Panel {
 
           Text {
             id: heroTitle
-            text: "Adaptive brightness"
+            text: "Daylight"
             color: root.barForeground
             font.family: root.bar ? root.bar.fontFamily : Style.font.family
             font.pixelSize: Style.font.title
@@ -186,7 +186,7 @@ Panel {
 
         Toggle {
           width: parent.width
-          label: "Adaptive control"
+          label: "Adjust automatically"
           checked: root.automatic
           enabled: root.backend !== null && !persistProc.running
           foreground: root.barForeground
@@ -197,7 +197,7 @@ Panel {
           visible: root.manualOverride && root.automatic
           enabled: root.backend !== null
           width: parent.width
-          text: "Resume adaptive control"
+          text: "Resume automatic control"
           iconText: "󰑐"
           foreground: root.barForeground
           fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
