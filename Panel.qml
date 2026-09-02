@@ -82,11 +82,23 @@ Panel {
     anchors.fill: parent
     bar: root.bar
     text: root.automatic ? "󰃠" : "󰃞"
-    // bar.active is the theme's attention colour — shell.toml reserves it for
-    // "modules calling attention to themselves (recording, alerts, updates)".
-    // Tracking the sun is the normal state and earns no highlight; being
-    // paused, or sitting on a manual override, is worth noticing.
-    active: !root.automatic || root.manualOverride
+
+    // Three states, three appearances, following the house style set by the
+    // first-party toggles (Night Light, DND, Stay Awake): those set
+    // useActiveColor: false and dimmed: !active, so off reads as dimmed and
+    // never as the accent. An earlier version had this backwards — off was
+    // painted in bar.active, the theme's attention colour, so a switched-off
+    // plugin was the loudest thing in the bar while a working one was plain.
+    //
+    //   off                 dimmed, plain colour
+    //   on                  full, plain colour
+    //   on + override       full, attention colour
+    //
+    // The override keeps the accent because it is the one state that really is
+    // calling attention to itself: the plugin is on but deliberately not
+    // following the schedule, and nothing else would say so.
+    dimmed: !root.automatic
+    active: root.manualOverride
     tooltipText: root.automatic
       ? "Daylight · " + root.current + "% · " + root.phase
         + " (sun " + root.elevationText + ")"
