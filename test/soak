@@ -1,0 +1,107 @@
+#!/usr/bin/env bash
+# Record what the plugin actually does, so a dawn can be read back instead of
+# sat through.
+#
+#   test/soak start     begin logging, one line a minute, in the background
+#   test/soak stop      stop it
+#   test/soak status    is it running, and how much has it got
+#   test/soak review    what happened, summarised
+#
+# Everything else in test/ either simulates the geometry or applies a synthetic
+# step. Neither reproduces the one case that matters most and cannot be forced:
+# a room genuinely getting darker while the sun sets, with the sensor and the
+# schedule moving together. That needs a real day, which means it has to be
+# recorded rather than watched.
+
+set -uo pipefail
+
+STATE="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy/kokd.sundial"
+LOG="$STATE/soak.tsv"
+PIDFILE="$STATE/soak.pid"
+mkdir -p "$STATE"
+
+running() {
+  [[ -r "$PIDFILE" ]] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null
+}
+
+collect() {
+  [[ -s "$LOG" ]] || printf 'time\tepoch\televation\tphase\tlux\ttarget\tcurrent\tlearned_offset\tband\tautomatic\n' > "$LOG"
+  while true; do
+    local s
+    s=$(omarchy-shell kokd.sundial-backend status 2>/dev/null)
+    if [[ -n "$s" ]]; then
+      jq -r --arg t "$(date '+%Y-%m-%d %H:%M:%S')" --arg e "$(date +%s)" '
+        [$t, $e, (.elevation // "-"), .phase, (.lux // "-"),
+         .target, .current, .learnedOffset, (.learnedBand // "-"), .automatic]
+        | @tsv' <<<"$s" >> "$LOG" 2>/dev/null
+    fi
+    sleep 60
+  done
+}
+
+case "${1:-status}" in
+  start)
+    if running; then echo "already running (pid $(cat "$PIDFILE"))"; exit 0; fi
+    collect >/dev/null 2>&1 &
+    echo $! > "$PIDFILE"
+    disown 2>/dev/null
+    echo "logging to $LOG (pid $(cat "$PIDFILE"))"
+    echo "leave it overnight; test/soak review reads it back"
+    ;;
+  stop)
+    if running; then kill "$(cat "$PIDFILE")" && echo "stopped"; else echo "not running"; fi
+    rm -f "$PIDFILE"
+    ;;
+  status)
+    if running; then echo "running (pid $(cat "$PIDFILE"))"; else echo "not running"; fi
+    [[ -r "$LOG" ]] && echo "$(( $(wc -l < "$LOG") - 1 )) samples in $LOG"
+    ;;
+  review)
+    [[ -r "$LOG" ]] || { echo "nothing logged yet"; exit 1; }
+    echo "== span =="
+    awk -F'\t' 'NR==2{first=$1} END{print first "  ->  " $1 "   (" NR-1 " samples)"}' "$LOG"
+
+    echo
+    echo "== the transitions, which is the part worth reading =="
+    echo "every sample where the phase changed, plus the two either side"
+    awk -F'\t' 'NR>1 { if (prev != "" && $4 != prev) print NR; prev = $4 }' "$LOG" > /tmp/.soak_rows
+    if [[ -s /tmp/.soak_rows ]]; then
+      printf '%-20s %8s %-16s %7s %7s %8s\n' time sun phase lux target current
+      while read -r row; do
+        awk -F'\t' -v r="$row" 'NR>=r-1 && NR<=r+1 { printf "%-20s %8s %-16s %7s %7s %8s\n", $1, $3, $4, $5, $6, $7 }' "$LOG"
+        echo "  --"
+      done < /tmp/.soak_rows
+    else
+      echo "  no phase change recorded yet"
+    fi
+    rm -f /tmp/.soak_rows
+
+    echo
+    echo "== how far the screen ran behind the target =="
+    echo "large or persistent gaps mean the slew cannot keep up with the ramp"
+    awk -F'\t' 'NR>1 && $6 != "-" && $7 != "-" {
+      d = $6 - $7; if (d < 0) d = -d
+      total += d; n++
+      if (d > worst) { worst = d; when = $1 }
+    } END {
+      if (n) printf "  mean %.1f points, worst %d points at %s\n", total/n, worst, when
+    }' "$LOG"
+
+    echo
+    echo "== lux range seen =="
+    awk -F'\t' 'NR>1 && $5 != "-" && $5 != "null" {
+      if (n++ == 0 || $5+0 < lo) lo = $5+0
+      if ($5+0 > hi) hi = $5+0
+      sum += $5
+    } END {
+      if (n) printf "  %d to %d lux, mean %d\n", lo, hi, sum/n
+      else print "  no sensor readings"
+    }' "$LOG"
+
+    echo
+    echo "== what it learned while you were not looking =="
+    omarchy-shell kokd.sundial-backend status 2>/dev/null | jq -c '.learned' || echo "  (plugin not responding)"
+    ;;
+  *)
+    echo "usage: test/soak {start|stop|status|review}" >&2; exit 1 ;;
+esac
