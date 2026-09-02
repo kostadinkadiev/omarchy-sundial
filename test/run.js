@@ -75,6 +75,12 @@ check("bright room at night raises brightness", Curve.blend(25, 5000, -20, 40) >
 check("dark room at noon lowers brightness", Curve.blend(85, 0, 45, 40) < 85);
 check("null lux is a no-op", Curve.blend(50, null, 0, 40) === 50);
 
+// The curve's fallback for an unreadable elevation is daytime brightness, so
+// Service.qml must refuse to act on it rather than driving an unconfigured
+// machine up to full. Pinning the fallback here keeps that contract visible.
+check("unknown elevation falls back to day, and must not be acted on",
+  Curve.solarBaseline(NaN, opts) === 85);
+
 check("target respects the floor",
   Curve.target(-30, null, { nightBrightness: 1, offsetPercent: -50, minBrightness: 5 }) === 5);
 check("target respects the ceiling",

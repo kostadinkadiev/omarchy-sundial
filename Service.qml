@@ -146,6 +146,14 @@ Item {
     }
 
     if (!automatic) return
+
+    // No location means no schedule. The curve's own fallback is daytime
+    // brightness, which is the right answer for a missing reading mid-run but
+    // exactly the wrong thing to act on at startup — an unconfigured machine
+    // would have its backlight driven up to `dayBrightness` for no reason.
+    // Nothing is written until there is a real sun angle to write from.
+    if (!isFinite(elevation)) return
+
     if (currentRaw < 0 || maxRaw <= 0) return
     if (Curve.withinDeadband(current, target, deadband)) return
 
