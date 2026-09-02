@@ -17,10 +17,13 @@ the sun curve is the whole schedule there.
 
 - Omarchy 4.0 or newer (the `omarchy-shell` plugin host).
 - `brightnessctl` and `jq`, both shipped with Omarchy.
-- A location set for the weather widget, which this plugin reuses:
+- A location. If you have already set one for the weather widget this plugin
+  reuses it; otherwise it works one out from your IP address and caches it, so
+  there is nothing to configure. To pin it by hand:
   `omarchy-weather-location --set "Skopje" 41.9961,21.4317`
 - Optionally an ambient light sensor. Run `bin/ab-probe` to see whether your
-  machine has one this plugin can read.
+  machine has one this plugin can read; if it does, room-light correction is on
+  by default.
 
 ## Install
 
@@ -66,8 +69,10 @@ target = solarBaseline(elevation)
 Illuminance is normalized logarithmically, because perceived brightness is
 logarithmic: 10 → 100 lux is the same perceptual step as 100 → 1000, and a
 linear lux table spends most of its resolution on daylight nobody can tell
-apart. `gain` is a slider; at zero the sensor is advisory only and the schedule
-is pure solar. That is the default.
+apart. `gain` is the **Room light** choice in the popup — *Sun only* (0), *Balanced*
+(30), or *Strong* (55). It defaults to Balanced on a machine that has a sensor
+and to Sun only on one that does not, so the sensor is used out of the box
+rather than waiting to be discovered.
 
 **4. Filtering tuned for how the failure feels.** Samples are reduced with a
 **median**, not a mean — one camera flash or passing headlight destroys a mean.
@@ -92,6 +97,23 @@ hardware probe runs once, at startup.
 
 ## Hardware support
 
+### Location
+
+| Order | Source |
+|---|---|
+| 1 | `~/.local/state/omarchy/settings/weather.json`, if you have set one |
+| 2 | A cached IP lookup, so an offline boot still has a schedule |
+| 3 | A fresh IP lookup via wttr.in, cached for next time |
+
+```sh
+bin/ab-locate | jq
+```
+
+Nothing is written to the backlight until a location resolves, so a machine
+that is offline with no cache is left alone rather than driven to a guess.
+
+### Sensor
+
 | Tier | Detection | Lux |
 |---|---|---|
 | `acpi` | device named `acpi-als`, or any `in_illuminance_input` | already lux |
@@ -105,6 +127,10 @@ Framework laptops; tier `acpi` covers Intel MacBooks and older ACPI laptops.
 bin/ab-probe | jq
 ```
 
+Dragging **Daytime** or **Night brightness** previews that level on the screen
+while you hold it, and releases back to the schedule — so you can see the night
+without waiting for it.
+
 ## Settings
 
 Stored inline on the widget's entry in `~/.config/omarchy/shell.json`, per the
@@ -115,7 +141,7 @@ shell's storage rules. All are editable from the popup.
 | `automatic` | `true` | Adaptive control on |
 | `dayBrightness` | `85` | Flat brightness with the sun up |
 | `nightBrightness` | `25` | Flat brightness after civil twilight |
-| `ambientGain` | `0` | How far the sensor may pull away from the sun curve |
+| `ambientGain` | sensor: `30`, none: `0` | How far room light may pull away from the sun curve |
 | `offsetPercent` | `0` | A flat shift applied to the whole curve |
 
 `offsetPercent` has no slider in the popup: with both curve anchors already

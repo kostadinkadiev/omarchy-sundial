@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# Resolve a location for the solar curve, and print it as
+# {"name":...,"latitude":...,"longitude":...} — or {"error":...} if every
+# source fails.
+#
+# Order of preference:
+#   1. The location the weather widget already owns. If the user has told
+#      Omarchy where they are, that is the answer; never override it.
+#   2. A cached IP lookup from a previous run, so a machine that boots offline
+#      still has a schedule.
+#   3. A fresh IP lookup, cached for next time.
+#
+# Step 3 is why this exists. Requiring a hand-set location before the plugin
+# does anything makes a fresh install a silent no-op, which is the worst way
+# for software to fail: nothing signals that anything is wrong.
+
+set -uo pipefail
+
+WEATHER_FILE="$HOME/.local/state/omarchy/settings/weather.json"
+CACHE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy/kokd.adaptive-brightness"
+CACHE_FILE="$CACHE_DIR/location.json"
+
+# Emit the file's contents when it carries usable coordinates.
+emit_if_valid() {
+  local file="$1"
+  [[ -r "$file" ]] || return 1
+  jq -e -c '
+    select((.latitude | type) == "number" and (.longitude | type) == "number")
+    | {name: (.name // ""), latitude, longitude}
+  ' "$file" 2>/dev/null
+}
+
+emit_if_valid "$WEATHER_FILE" && exit 0
+emit_if_valid "$CACHE_FILE" && exit 0
+
+response=$(curl -fsS --max-time 8 'https://wttr.in/?format=j1' 2>/dev/null) || {
+  jq -cn '{error: "no location set and the IP lookup failed"}'
+  exit 0
+}
+
+location=$(jq -e -c '
+  .nearest_area[0]
+  | {
+      name: (.areaName[0].value // ""),
+      latitude: (.latitude | tonumber),
+      longitude: (.longitude | tonumber)
+    }
+' <<<"$response" 2>/dev/null) || {
+  jq -cn '{error: "the IP lookup returned no coordinates"}'
+  exit 0
+}
+
+mkdir -p "$CACHE_DIR" && printf '%s\n' "$location" >"$CACHE_FILE"
+printf '%s\n' "$location"

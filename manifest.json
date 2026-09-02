@@ -34,7 +34,6 @@
       "automatic": true,
       "dayBrightness": 85,
       "nightBrightness": 25,
-      "ambientGain": 0,
       "offsetPercent": 0
     }
   }

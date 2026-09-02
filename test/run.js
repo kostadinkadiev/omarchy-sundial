@@ -54,6 +54,11 @@ check("phase labels day", Solar.phase(45) === "day");
 check("phase labels civil twilight", Solar.phase(-3) === "civil twilight");
 check("phase labels night", Solar.phase(-30) === "night");
 
+check("short phase is card-sized", Solar.phaseShort(45) === "Day");
+check("short phase collapses both twilights", Solar.phaseShort(-3) === "Dusk"
+  && Solar.phaseShort(-10) === "Night");
+check("short phase handles no location", Solar.phaseShort(NaN) === "Unknown");
+
 // ---------------------------------------------------------------- Curve.js
 var opts = { dayBrightness: 85, nightBrightness: 25 };
 check("high sun gives day brightness", Curve.solarBaseline(45, opts) === 85);

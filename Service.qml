@@ -28,7 +28,16 @@ Item {
   property bool automatic: true
   property int dayBrightness: 85
   property int nightBrightness: 25
-  property int ambientGain: 0
+  // -1 means "the user has not chosen", which is distinguishable because the
+  // shell does not write manifest defaults into shell.json — an untouched
+  // widget entry is a bare { "id": ... }. So the default can depend on the
+  // hardware: a machine with a light sensor should use it out of the box.
+  // Shipping gain 0 everywhere meant a plugin called Adaptive Brightness
+  // ignored the sensor until the user found a slider and guessed a number.
+  property int ambientGainExplicit: -1
+  readonly property int ambientGain: ambientGainExplicit >= 0
+    ? ambientGainExplicit
+    : (hasSensor ? 30 : 0)
   property int offsetPercent: 0
   property bool settingsReady: false
 
@@ -36,8 +45,10 @@ Item {
   property real latitude: NaN
   property real longitude: NaN
   property string locationName: ""
+  property string locationError: ""
   property real elevation: NaN
   readonly property string phase: Solar.phase(elevation)
+  readonly property string phaseShort: Solar.phaseShort(elevation)
 
   property string backlightDevice: ""
   property int maxRaw: 0
@@ -55,6 +66,8 @@ Item {
   property var luxSamples: []
 
   property int target: 0
+  property int pendingWrite: -1
+  property bool previewing: false
   property bool manualOverride: false
   property int overrideTarget: 0
   property bool probeReady: false
@@ -99,7 +112,8 @@ Item {
     automatic = settings.automatic === undefined ? true : settings.automatic === true
     dayBrightness = clampSetting(settings.dayBrightness, 10, 100, 85)
     nightBrightness = clampSetting(settings.nightBrightness, 1, 100, 25)
-    ambientGain = clampSetting(settings.ambientGain, 0, 60, 0)
+    ambientGainExplicit = settings.ambientGain === undefined || settings.ambientGain === null
+      ? -1 : clampSetting(settings.ambientGain, 0, 60, 0)
     offsetPercent = clampSetting(settings.offsetPercent, -30, 30, 0)
     settingsReady = true
     evaluate()
@@ -134,6 +148,9 @@ Item {
   function evaluate() {
     if (!settingsReady || !probeReady) return
 
+    // While a slider is being dragged the screen belongs to the preview.
+    if (previewing) return
+
     target = Curve.target(elevation, ambientGain > 0 ? lux : null, curveSettings())
 
     // A manual override stands until the schedule has moved somewhere clearly
@@ -162,14 +179,38 @@ Item {
   }
 
   function write(percent) {
-    if (writeProcess.running || maxRaw <= 0 || backlightDevice === "") return
+    if (maxRaw <= 0 || backlightDevice === "") return
     // Written as a raw value rather than a percentage so the number that lands
     // in sysfs is exactly the number compared against on the next read —
     // brightnessctl's own rounding would otherwise look like a manual change.
     var raw = Math.max(1, Math.min(maxRaw, Math.round((percent * maxRaw) / 100)))
+
+    // Only the newest value matters. Dragging a slider outruns the process,
+    // and queueing every intermediate step would make the panel lag behind
+    // the thumb; superseding keeps the screen on the current position.
+    if (writeProcess.running) {
+      pendingWrite = raw
+      return
+    }
+    pendingWrite = -1
     lastWrittenRaw = raw
     writeProcess.command = ["brightnessctl", "-d", backlightDevice, "-q", "set", String(raw)]
     writeProcess.running = true
+  }
+
+  // Live preview for the popup's sliders. Dragging "night brightness" should
+  // show you the night, not make you wait until dark to find out whether you
+  // like it — which is how every OS brightness control behaves. Preview writes
+  // go through write(), so they carry this plugin's signature and are never
+  // mistaken for the user reaching for the brightness keys.
+  function previewBrightness(percent) {
+    previewing = true
+    write(Math.max(1, Math.min(100, Math.round(percent))))
+  }
+
+  function endPreview() {
+    previewing = false
+    evaluate()
   }
 
   function noteBacklight(rawText) {
@@ -222,7 +263,16 @@ Item {
     }
   }
 
-  Process { id: writeProcess }
+  Process {
+    id: writeProcess
+    onExited: if (root.pendingWrite >= 0) {
+      var raw = root.pendingWrite
+      root.pendingWrite = -1
+      root.lastWrittenRaw = raw
+      command = ["brightnessctl", "-d", root.backlightDevice, "-q", "set", String(raw)]
+      running = true
+    }
+  }
 
   FileView {
     id: backlightFile
@@ -238,31 +288,47 @@ Item {
     onLoaded: root.applyLux(text())
   }
 
-  // Location for the solar curve, reusing the location the weather widget
-  // already owns rather than asking for it twice. Absent means the curve
-  // cannot run, and the widget says so.
+  // Location for the solar curve. bin/ab-locate owns the precedence — the
+  // weather widget's location, then a cached IP lookup, then a fresh one —
+  // so an install with nothing configured still has a schedule instead of
+  // sitting silently inert.
+  Process {
+    id: locateProcess
+    command: [Qt.resolvedUrl("bin/ab-locate").toString().replace(/^file:\/\//, "")]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        try {
+          var data = JSON.parse(String(text || "{}"))
+          if (data.error) {
+            root.latitude = NaN
+            root.longitude = NaN
+            root.locationError = String(data.error)
+          } else {
+            root.latitude = parseFloat(data.latitude)
+            root.longitude = parseFloat(data.longitude)
+            root.locationName = String(data.name || "")
+            root.locationError = ""
+          }
+        } catch (parseError) {
+          root.latitude = NaN
+          root.longitude = NaN
+          root.locationError = "could not resolve a location"
+        }
+        root.tick()
+      }
+    }
+  }
+
+  // Re-resolve when the user changes the weather location, so setting one
+  // takes effect immediately rather than at the next login. Watching the
+  // directory would be better, but FileView cannot observe a file that does
+  // not exist yet; a missing file simply leaves the IP fallback in charge.
   FileView {
-    id: locationFile
     path: Quickshell.env("HOME") + "/.local/state/omarchy/settings/weather.json"
     watchChanges: true
     printErrors: false
-    onFileChanged: reload()
-    onLoaded: {
-      try {
-        var data = JSON.parse(String(text() || "{}"))
-        root.latitude = parseFloat(data.latitude)
-        root.longitude = parseFloat(data.longitude)
-        root.locationName = String(data.name || "")
-      } catch (parseError) {
-        root.latitude = NaN
-        root.longitude = NaN
-      }
-      root.tick()
-    }
-    onLoadFailed: {
-      root.latitude = NaN
-      root.longitude = NaN
-    }
+    onFileChanged: locateProcess.running = true
   }
 
   // Two cadences: the sensor needs a few seconds to track a room, the sun
@@ -283,7 +349,10 @@ Item {
     function onBarConfigChanged() { root.applySettings() }
   }
 
-  Component.onCompleted: probeProcess.running = true
+  Component.onCompleted: {
+    probeProcess.running = true
+    locateProcess.running = true
+  }
 
   // IPC targets are registered globally in the single long-lived omarchy-shell
   // process, shared with every other plugin the user has installed, so this is
@@ -304,6 +373,8 @@ Item {
         current: root.current,
         target: root.target,
         manualOverride: root.manualOverride,
+        previewing: root.previewing,
+        locationError: root.locationError,
         ambientGain: root.ambientGain,
         offsetPercent: root.offsetPercent,
         error: root.error
