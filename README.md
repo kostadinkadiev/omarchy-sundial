@@ -161,6 +161,18 @@ The bar icon is the whole feature:
 | **Scroll** | brighter or dimmer, 5% a notch — and it remembers, for this time of day |
 | **Right-click** | the popup |
 
+Hovering gives the state and the next thing the sun will do:
+
+```
+Sundial · 28% · night · sunrise 06:01
+```
+
+That last field used to be the sun's elevation in degrees — `sun -23.9°` —
+which is a developer's unit pretending to be information. It reads as a
+temperature, and Omarchy's own weather widget sits a few icons away on the same
+bar reporting one. The time is formatted to match whatever the clock is using,
+12- or 24-hour.
+
 The popup holds no control the icon does not. It answers one question —
 *"Following the sun in Skopje. Your room is dark, so it's dimmer than usual.
 You keep nights 12% dimmer than the schedule."* — and offers to forget what it

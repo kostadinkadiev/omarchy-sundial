@@ -47,6 +47,11 @@ Item {
   property string locationName: ""
   property string locationError: ""
   property real elevation: NaN
+  // Epoch milliseconds of the next sunrise or sunset, 0 when there is none to
+  // report -- no location yet, or a latitude where the sun does not cross the
+  // horizon at this time of year.
+  property real nextEventTime: 0
+  property bool nextEventRising: false
   readonly property string phase: Solar.phase(elevation)
   readonly property string phaseShort: Solar.phaseShort(elevation)
   readonly property bool ambientActive: hasSensor && ambientGain > 0
@@ -169,6 +174,29 @@ Item {
   // ------------------------------------------------------------ the loop
   function updateElevation() {
     elevation = Solar.elevation(new Date(), latitude, longitude)
+    updateSunEvents(false)
+  }
+
+  // Recomputed only once the last one has passed, so the search runs about
+  // twice a day rather than on every two-second tick. It is a cheap search --
+  // a few hundred evaluations of the same trig the curve already does -- but
+  // running it 43,200 times a day to get the same answer would be silly.
+  function updateSunEvents(force) {
+    if (!isFinite(latitude) || !isFinite(longitude)) {
+      nextEventTime = 0
+      return
+    }
+
+    var now = Date.now()
+    if (!force && nextEventTime > now) return
+
+    var crossing = Solar.nextHorizonCrossing(new Date(now), latitude, longitude)
+    if (!crossing) {
+      nextEventTime = 0
+      return
+    }
+    nextEventTime = crossing.time.getTime()
+    nextEventRising = crossing.rising === true
   }
 
   function applyLux(rawText) {
@@ -441,6 +469,7 @@ Item {
             root.locationName = String(data.name || "")
             root.locationError = ""
           }
+          root.updateSunEvents(true)
         } catch (parseError) {
           root.latitude = NaN
           root.longitude = NaN
@@ -510,6 +539,9 @@ Item {
         learned: root.learned,
         learnedOffset: root.learnedOffset,
         phaseKey: root.phaseKey,
+        nextEvent: root.nextEventTime > 0
+          ? { at: new Date(root.nextEventTime).toISOString(), rising: root.nextEventRising }
+          : null,
         error: root.error
       })
     }

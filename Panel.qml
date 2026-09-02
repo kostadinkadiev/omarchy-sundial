@@ -44,9 +44,39 @@ Panel {
   readonly property bool hasLocation: backend
     ? isFinite(backend.latitude) && isFinite(backend.longitude) : false
 
-  readonly property string elevationText: isFinite(elevation)
-    ? (elevation >= 0 ? "+" : "") + elevation.toFixed(1) + "°"
-    : "—"
+  readonly property real nextEventTime: backend ? backend.nextEventTime : 0
+  readonly property bool nextEventRising: backend ? backend.nextEventRising : false
+
+  // Match whatever the clock two icons along is doing. The point of showing a
+  // time here is that it reads as one without a second thought, and a 24-hour
+  // sunset beside a 12-hour clock fails that for no reason.
+  readonly property bool twelveHour: {
+    var config = bar && bar.shell ? bar.shell.barConfig : null
+    var layout = config && config.layout ? config.layout : null
+    if (!layout) return false
+    var sections = ["left", "center", "right"]
+    for (var s = 0; s < sections.length; s++) {
+      var entries = layout[sections[s]]
+      if (!Array.isArray(entries)) continue
+      for (var i = 0; i < entries.length; i++) {
+        var entry = entries[i]
+        if (typeof entry === "object" && entry !== null
+            && String(entry.id || "") === "omarchy.clock")
+          return /ap/i.test(String(entry.format || ""))
+      }
+    }
+    return false
+  }
+
+  // Replaced the sun's elevation in degrees, which was a developer's unit
+  // pretending to be information: "sun -23.9°" reads as a temperature, and
+  // this bar already carries omarchy.weather a few icons away reporting one.
+  // Nobody has ever wanted a solar elevation. What they want from a plugin
+  // that follows the sun is when the sun next does something.
+  readonly property string sunEventText: nextEventTime > 0
+    ? (nextEventRising ? "sunrise " : "sunset ")
+      + Qt.formatTime(new Date(nextEventTime), twelveHour ? "h:mm AP" : "HH:mm")
+    : ""
 
   readonly property string statusSentence: Status.sentence({
     hasLocation: root.hasLocation,
@@ -110,7 +140,7 @@ Panel {
     dimmed: !root.automatic
     tooltipText: root.automatic
       ? "Sundial · " + root.current + "% · " + root.phase
-        + " (sun " + root.elevationText + ")"
+        + (root.sunEventText ? " · " + root.sunEventText : "")
         + "\nScroll to adjust · right-click for details"
       : "Sundial paused\nClick to resume"
 
@@ -211,6 +241,15 @@ Panel {
           font.family: root.bar ? root.bar.fontFamily : Style.font.family
           font.pixelSize: Style.font.body
           wrapMode: Text.WordWrap
+        }
+
+        Text {
+          visible: root.sunEventText !== ""
+          width: parent.width
+          text: root.sunEventText.charAt(0).toUpperCase() + root.sunEventText.slice(1)
+          color: Qt.darker(root.barForeground, 1.4)
+          font.family: root.bar ? root.bar.fontFamily : Style.font.family
+          font.pixelSize: Style.font.caption
         }
 
         // Shown only when there is something to do about it.

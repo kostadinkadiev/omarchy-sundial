@@ -101,6 +101,63 @@ check("phase keys match the bands phaseShort reports",
   && Solar.phaseKey(-3) === "dusk" && Solar.phaseKey(-20) === "night");
 check("no phase key without a sun angle", Solar.phaseKey(NaN) === "");
 
+// ------------------------------------------------------- sunrise and sunset
+var SKOPJE = [41.9965, 21.4314];
+
+function crossings(iso, count, latitude, longitude) {
+  var at = new Date(iso);
+  var out = [];
+  for (var i = 0; i < count; i++) {
+    var event = Solar.nextHorizonCrossing(at, latitude, longitude);
+    if (!event) break;
+    out.push(event);
+    at = event.time;
+  }
+  return out;
+}
+
+check("a mid-latitude day has a crossing to find",
+  Solar.nextHorizonCrossing(new Date("2026-03-20T00:00:00Z"), SKOPJE[0], SKOPJE[1]) !== null);
+
+// The solver has to agree with the elevation() the rest of the plugin runs on,
+// which is the reason it searches that function rather than using a closed
+// form that could quietly disagree with it near the equinoxes.
+check("the sun really is at the horizon at the reported time", function () {
+  var event = Solar.nextHorizonCrossing(new Date("2026-03-20T00:00:00Z"), SKOPJE[0], SKOPJE[1]);
+  return Math.abs(Solar.elevation(event.time, SKOPJE[0], SKOPJE[1]) + 0.833) < 0.01;
+}());
+
+check("crossings alternate rise and set", function () {
+  var found = crossings("2026-03-20T00:00:00Z", 4, SKOPJE[0], SKOPJE[1]);
+  return found.length === 4 && found[0].rising && !found[1].rising
+    && found[2].rising && !found[3].rising;
+}());
+
+// Asking at the exact moment of a crossing must return the following one, not
+// the one that has just happened. The horizon test lands on a coin flip there,
+// so this is the case that broke first on real data.
+check("a crossing is strictly after the moment asked about", function () {
+  var first = Solar.nextHorizonCrossing(new Date("2026-06-21T00:00:00Z"), SKOPJE[0], SKOPJE[1]);
+  var second = Solar.nextHorizonCrossing(first.time, SKOPJE[0], SKOPJE[1]);
+  return second.time.getTime() > first.time.getTime() && second.rising !== first.rising;
+}());
+
+// Skopje sees about 15h05m at the solstice and about 9h05m at midwinter.
+check("day length matches the latitude across the year", function () {
+  function hours(iso) {
+    var found = crossings(iso, 2, SKOPJE[0], SKOPJE[1]);
+    return (found[1].time.getTime() - found[0].time.getTime()) / 3600000;
+  }
+  var summer = hours("2026-06-21T00:00:00Z");
+  var winter = hours("2026-12-21T00:00:00Z");
+  return Math.abs(summer - 15.15) < 0.3 && Math.abs(winter - 9.1) < 0.3;
+}, "summer/winter day length");
+
+check("no crossing above the arctic circle in midsummer",
+  Solar.nextHorizonCrossing(new Date("2026-06-21T00:00:00Z"), 80, 0) === null);
+check("no crossing without a location",
+  Solar.nextHorizonCrossing(new Date("2026-06-21T00:00:00Z"), NaN, NaN) === null);
+
 check("an empty table reads as zero everywhere",
   Curve.learnedOffset(null, "night") === 0 && !Curve.hasLearned(null));
 check("learning one band leaves the others alone", function () {
