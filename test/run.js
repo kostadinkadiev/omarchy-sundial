@@ -161,17 +161,17 @@ check("no crossing without a location",
 check("an empty table reads as zero everywhere",
   Curve.learnedOffset(null, "night") === 0 && !Curve.hasLearned(null));
 check("learning one band leaves the others alone", function () {
-  var table = Curve.learn(null, "night", -18);
+  var table = Curve.learnAt(null, -20, -18);
   return table.night === -18 && table.day === 0 && table.golden === 0 && table.dusk === 0;
 }());
 check("learning accumulates within a band",
-  Curve.learn(Curve.learn(null, "day", 5), "day", 4).day === 9);
-check("an unknown band teaches nothing",
-  !Curve.hasLearned(Curve.learn(null, "", -20)));
+  Curve.learnAt(Curve.learnAt(null, 30, 5), 30, 4).day === 9);
+check("no sun angle teaches nothing",
+  !Curve.hasLearned(Curve.learnAt(null, NaN, -20)));
 check("a garbage table degrades to zero rather than NaN",
   Curve.learnedOffset({ night: "nonsense" }, "night") === 0);
 check("stored offsets are bounded",
-  Curve.learn(null, "day", 5000).day === 100 && Curve.learn(null, "day", -5000).day === -100);
+  Curve.learnAt(null, 30, 5000).day === 100 && Curve.learnAt(null, 30, -5000).day === -100);
 check("forgetting clears every band", !Curve.hasLearned(Curve.forgetLearned()));
 check("sub-1% is rounding, not a preference", !Curve.hasLearned({ night: 0.4 }));
 
@@ -180,24 +180,82 @@ check("a learned offset moves the target", function () {
   return Curve.target(-20, null, { learnedOffset: -18 }) === plain - 18;
 }());
 
+// ------------------------------------------------------ blending the bands
+//
+// A band is a step function and the rest of the curve goes to some trouble to
+// avoid steps, so the offsets are interpolated between anchors. Applied
+// naively a preference taught at dusk and not at night lands as a cliff at the
+// boundary -- twenty points in the minute the schedule itself moves one.
+
+check("weights sum to one wherever the sun is", function () {
+  for (var elevation = -30; elevation <= 40; elevation += 0.5) {
+    var total = 0;
+    var weights = Curve.learnedWeights(elevation);
+    for (var i = 0; i < weights.length; i++) total += weights[i].weight;
+    if (Math.abs(total - 1) > 1e-9) return false;
+  }
+  return true;
+}());
+check("no band has a say without a sun angle",
+  Curve.learnedWeights(NaN).length === 0 && Curve.dominantBand(NaN) === null);
+check("the plateaus belong to one band outright",
+  Curve.learnedOffsetAt({ night: -14 }, -40) === -14
+  && Curve.learnedOffsetAt({ day: 9 }, 60) === 9);
+check("between anchors the neighbours share it", function () {
+  var table = { night: -14, dusk: 0, golden: 0, day: 0 };
+  var midway = Curve.learnedOffsetAt(table, -4.5);
+  return midway < -1 && midway > -13;
+}());
+
+// The check test/day.js makes across a whole day, as a unit test: the offset
+// in force must never move faster than the schedule it rides on.
+check("a taught offset stays within a bounded multiple of the schedule", function () {
+  // A realistic worst case: a large preference taught in one band and nothing
+  // in its neighbour, which is what a single evening of adjusting produces.
+  var table = { night: 0, dusk: 26, golden: 0, day: 0 };
+  var taught = 0;
+  var schedule = 0;
+  for (var elevation = -30; elevation <= 40; elevation += 0.01) {
+    var offsetStep = Math.abs(Curve.learnedOffsetAt(table, elevation)
+      - Curve.learnedOffsetAt(table, elevation - 0.01));
+    var baselineStep = Math.abs(Curve.solarBaseline(elevation, {})
+      - Curve.solarBaseline(elevation - 0.01, {}));
+    if (offsetStep > taught) taught = offsetStep;
+    if (baselineStep > schedule) schedule = baselineStep;
+  }
+
+  // Not 1x, and the geometry says why: the baseline spreads its whole 60-point
+  // range over the 16 degrees from -6 to +10, while an offset taught at dusk
+  // and absent at night has the 3 degrees between those two anchors to unwind
+  // in. Roughly five times less room, so a little over twice the gradient.
+  //
+  // What matters to someone looking at the screen is points per minute, not
+  // per degree, and that depends on how fast the sun sweeps those degrees --
+  // which varies with latitude and season. test/day.js is the authority there:
+  // it measures the real thing across a whole day and holds the taught curve
+  // to within a point a minute of the schedule, from the equator to 60 degrees.
+  return taught / schedule < 2.5;
+}());
+
 // The property the whole design rests on: after absorbing an adjustment the
 // target equals what the user set, so the loop has nothing left to correct.
 // Anything less than full absorption leaves a residual the slew would chase,
 // which is the fighting the manual override existed to paper over.
-check("absorbing an adjustment leaves nothing to correct", function () {
-  var settings = { learnedOffset: 0 };
-  var wanted = Curve.target(-20, null, settings);   // 25
-  var user = 12;                                    // user dims to 12%
-  settings.learnedOffset = Curve.learn(null, "night", user - wanted).night;
-  return Curve.target(-20, null, settings) === user;
-}());
-
-check("absorption survives a band the schedule ramps through", function () {
-  var settings = { learnedOffset: 0 };
-  var wanted = Curve.target(-3, null, settings);
-  settings.learnedOffset = Curve.learn(null, "dusk", 70 - wanted).dusk;
-  return Curve.target(-3, null, settings) === 70;
-}());
+//
+// Interpolation is where this nearly broke: between anchors a band is only
+// partly in force, so filing the residual raw would land short. Checked at the
+// exact midpoint, where a band carries half the weight and the correction has
+// to be doubled to arrive whole.
+[-20, -6, -4.5, -3, 0, 5, 10, 30].forEach(function (elevation) {
+  check("absorption is exact at " + elevation + " degrees", function () {
+    var settings = { learnedOffset: 0 };
+    var wanted = Curve.target(elevation, null, settings);
+    var user = wanted >= 50 ? 20 : 70;
+    var table = Curve.learnAt(null, elevation, user - wanted);
+    settings.learnedOffset = Curve.learnedOffsetAt(table, elevation);
+    return Curve.target(elevation, null, settings) === user;
+  }(), "elevation " + elevation);
+});
 
 check("deadband suppresses small moves", Curve.withinDeadband(50, 52, 3));
 check("deadband allows real moves", !Curve.withinDeadband(50, 60, 3));
@@ -249,22 +307,22 @@ check("paused says so",
 check("paused outranks the room",
   Status.sentence(withState({ automatic: false, ambientDelta: -0.9 })).indexOf("dark") === -1);
 check("what was learned is said out loud",
-  Status.sentence(withState({ phaseKey: "night", learnedOffset: -12 }))
+  Status.sentence(withState({ learnedBand: "night", learnedOffset: -12 }))
     .indexOf("You keep nights 12% dimmer") !== -1);
 check("the direction of learning is reported",
-  Status.sentence(withState({ phaseKey: "day", learnedOffset: 8 }))
+  Status.sentence(withState({ learnedBand: "day", learnedOffset: 8 }))
     .indexOf("days 8% brighter") !== -1);
 check("nothing learned adds no clause",
-  Status.sentence(withState({ phaseKey: "night", learnedOffset: 0 }))
+  Status.sentence(withState({ learnedBand: "night", learnedOffset: 0 }))
     .indexOf("You keep") === -1);
 check("rounding is not reported as a preference",
-  Status.sentence(withState({ phaseKey: "night", learnedOffset: 0.4 }))
+  Status.sentence(withState({ learnedBand: "night", learnedOffset: 0.4 }))
     .indexOf("You keep") === -1);
 check("learning is not claimed without a sun angle",
-  Status.sentence(withState({ phaseKey: "", learnedOffset: -12 }))
+  Status.sentence(withState({ learnedBand: "", learnedOffset: -12 }))
     .indexOf("You keep") === -1);
 check("paused says nothing about learning",
-  Status.sentence(withState({ automatic: false, phaseKey: "night", learnedOffset: -12 }))
+  Status.sentence(withState({ automatic: false, learnedBand: "night", learnedOffset: -12 }))
     .indexOf("You keep") === -1);
 check("no location outranks everything",
   Status.sentence(withState({ hasLocation: false, automatic: false })).indexOf("no sun to follow") !== -1);

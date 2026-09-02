@@ -95,6 +95,19 @@ decision: learning only half the difference would leave the screen still moving
 after you had stopped adjusting it, which is the fighting the whole design
 exists to prevent. Halfway is the one setting worse than either end.
 
+Between bands the offsets are interpolated, with the same smoothstep used
+inside them. A band is a step function, and a step is precisely what the rest
+of the curve avoids: applied naively, a preference taught at dusk and not at
+night arrives as a cliff at the boundary — twenty points in the minute the
+schedule itself moves one, which reads as the screen lurching for no reason.
+`test/day.js` measures this across a whole day, which is how it was found.
+
+Interpolating has one consequence worth stating, because it nearly undid the
+paragraph above: between anchors a band is only partly in force, so a
+correction filed raw would land short and leave a remainder for the loop to
+chase. It is divided by that band's weight instead, which is never less than a
+half, so it arrives whole.
+
 **6. Adjustments are attributed exactly.** The backlight sysfs value is compared
 against the last value this plugin wrote, so reaching for the brightness keys is
 unambiguous — no threshold to tune. Two races make that harder than it sounds:

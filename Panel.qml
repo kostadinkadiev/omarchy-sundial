@@ -35,7 +35,7 @@ Panel {
   readonly property var backend: bar && bar.shell ? bar.shell.serviceFor(moduleName) : null
   readonly property bool automatic: backend ? backend.automatic : false
   readonly property bool hasSensor: backend ? backend.hasSensor : false
-  readonly property string phaseKey: backend ? backend.phaseKey : ""
+  readonly property string learnedBand: backend ? backend.learnedBand : ""
   readonly property real learnedOffset: backend ? backend.learnedOffset : 0
   readonly property bool hasLearned: backend ? backend.hasLearned : false
   readonly property bool ambientActive: backend ? backend.ambientActive : false
@@ -89,7 +89,7 @@ Panel {
     locationName: root.locationName,
     automatic: root.automatic,
     hasSensor: root.hasSensor,
-    phaseKey: root.phaseKey,
+    learnedBand: root.learnedBand,
     learnedOffset: root.learnedOffset,
     ambientActive: root.ambientActive,
     ambientDelta: root.ambientDelta

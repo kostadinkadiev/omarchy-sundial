@@ -30,7 +30,7 @@ var settings = { dayBrightness: 85, nightBrightness: 25, ambientGain: 0 };
 
 // A plausible set of taught preferences: dusk and night pulled well down, the
 // day left alone. This is the shape that exposes boundary behaviour.
-var learned = Curve.learn(Curve.learn(null, "night", -14), "dusk", -20);
+var learned = Curve.learnAt(Curve.learnAt(null, -20, -14), -3, -20);
 
 function sample(minute) {
   var at = new Date(date + "T00:00:00Z");
@@ -38,7 +38,7 @@ function sample(minute) {
   var elevation = Solar.elevation(at, latitude, longitude);
   var key = Solar.phaseKey(elevation);
   var withLearning = Object.create(settings);
-  withLearning.learnedOffset = Curve.learnedOffset(learned, key);
+  withLearning.learnedOffset = Curve.learnedOffsetAt(learned, elevation);
   return {
     at: at,
     minute: minute,
@@ -93,16 +93,15 @@ console.log("largest one-minute change, with learning:  " + taughtJump.size + " 
   + (taughtJump.at ? " at " + hhmm(taughtJump.at.at) + " (" + taughtJump.from.key
      + " -> " + taughtJump.at.key + ")" : ""));
 
-if (plainJump.size > 1) {
-  problems.push("the schedule alone is not smooth: " + plainJump.size + " points in one minute");
-}
-
-// The whole point of a smoothstep ramp is that no minute of the day is visibly
-// different from the one before it. A per-band offset is a step function, so
-// crossing a boundary can undo that -- this is the check that says whether it
-// does, and by how much.
-if (taughtJump.size > 2) {
-  problems.push("learning introduces a " + taughtJump.size + "-point step at a band boundary");
+// Relative, not absolute. Near the equator the sun crosses twilight almost
+// vertically and the schedule alone moves two points a minute; at sixty
+// degrees the same ramp is spread over hours and moves one. Neither is a
+// defect, so the question is not how fast the taught curve moves but whether
+// learning made it move faster than the schedule it rides on. One point of
+// slack for rounding.
+if (taughtJump.size > plainJump.size + 1) {
+  problems.push("learning moves " + taughtJump.size + " points a minute where the schedule moves "
+    + plainJump.size + ": a band boundary is showing through");
 }
 
 console.log();

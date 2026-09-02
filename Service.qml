@@ -85,7 +85,12 @@ Item {
   // expired, and why it is absorbed whole rather than blended.
   property var learned: Curve.forgetLearned()
   readonly property string phaseKey: Solar.phaseKey(elevation)
-  readonly property real learnedOffset: Curve.learnedOffset(learned, phaseKey)
+  // The band a correction made now would be filed under, which is not always
+  // the band phaseKey names: near an anchor boundary the nearer anchor owns
+  // the angle. phaseKey is prose for the user, this is where learning goes.
+  readonly property var learnedBandInfo: Curve.dominantBand(elevation)
+  readonly property string learnedBand: learnedBandInfo ? learnedBandInfo.key : ""
+  readonly property real learnedOffset: Curve.learnedOffsetAt(learned, elevation)
   readonly property bool hasLearned: Curve.hasLearned(learned)
 
   // Attribution epoch. A backlight read is only evidence of who moved the
@@ -102,6 +107,12 @@ Item {
   // ground move under this reading?
   property int writeEpoch: 0
   property int readEpoch: -1
+
+  // A reading that differed from ours but arrived too tangled with one of our
+  // own writes to attribute. It is deferred to the next tick, never discarded:
+  // dropping it would mean the loop slews on regardless and erases the change
+  // a tick before working out that it was the user's.
+  property bool attributionPending: false
 
   readonly property int deadband: 3
   readonly property int sampleWindow: 5
@@ -214,6 +225,9 @@ Item {
 
     if (!automatic) return
 
+    // Nothing may be written on top of a reading we could not attribute.
+    if (attributionPending) return
+
     // No location means no schedule. The curve's own fallback is daytime
     // brightness, which is the right answer for a missing reading mid-run but
     // exactly the wrong thing to act on at startup — an unconfigured machine
@@ -277,13 +291,31 @@ Item {
     // reaching for the brightness keys. Comparing against the last value
     // written here detects that exactly, with no polling race and no
     // threshold to tune.
-    var manual = automatic && lastWrittenRaw >= 0 && raw !== lastWrittenRaw
-      && !writeProcess.running && readEpoch === writeEpoch
+    var differs = lastWrittenRaw >= 0 && raw !== lastWrittenRaw
+    var attributable = !writeProcess.running && readEpoch === writeEpoch
 
     currentRaw = raw
     if (lastWrittenRaw < 0) lastWrittenRaw = raw
 
-    if (manual) absorb()
+    if (!automatic || !differs) {
+      attributionPending = false
+      return
+    }
+
+    // Wait a tick rather than guess. Suppressing attribution here and letting
+    // the loop carry on was a silent way to lose the adjustment entirely: the
+    // slew would move off the user's value, the next read would match what we
+    // had just written, and there would no longer be anything to notice. Most
+    // likely exactly when a keypress lands during one of our own writes --
+    // which is to say while the plugin is already moving the screen, which is
+    // when a user is most likely to reach for the keys.
+    if (!attributable) {
+      attributionPending = true
+      return
+    }
+
+    attributionPending = false
+    absorb()
   }
 
   // Take the user's brightness as the truth for this solar band.
@@ -296,13 +328,12 @@ Item {
   // and there is no window to wait out. Holding a brightness key just teaches
   // the same band repeatedly, converging on wherever the key stops.
   function absorb() {
-    var key = phaseKey
-    if (key === "") return
+    if (!isFinite(elevation)) return
 
     var residual = current - target
     if (Math.abs(residual) < 1) return
 
-    learned = Curve.learn(learned, key, residual)
+    learned = Curve.learnAt(learned, elevation, residual)
     // The user's value is now this plugin's value; without this the next read
     // would look like a second manual change and learn the same delta twice.
     lastWrittenRaw = currentRaw
@@ -504,8 +535,9 @@ Item {
         ambientGain: root.ambientGain,
         offsetPercent: root.offsetPercent,
         learned: root.learned,
-        learnedOffset: root.learnedOffset,
+        learnedOffset: Math.round(root.learnedOffset * 10) / 10,
         phaseKey: root.phaseKey,
+        learnedBand: root.learnedBand,
         nextEvent: root.nextEventTime > 0
           ? { at: new Date(root.nextEventTime).toISOString(), rising: root.nextEventRising }
           : null,
