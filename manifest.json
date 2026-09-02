@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "id": "kokd.adaptive-brightness",
+  "name": "Adaptive Brightness",
+  "version": "0.1.0",
+  "author": "Kostadin Kadiev",
+  "license": "MIT",
+  "description": "Display brightness that follows the sun and the room: a solar-elevation baseline for every machine, corrected by the ambient light sensor where one exists.",
+  "kinds": [
+    "service",
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "service": "Service.qml",
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "Adaptive Brightness",
+    "description": "Brightness that tracks sun elevation, corrected by the ambient light sensor when the machine has one.",
+    "category": "System",
+    "aliases": [
+      "brightness",
+      "adaptive",
+      "auto-brightness",
+      "backlight",
+      "ambient",
+      "als",
+      "flux",
+      "night"
+    ],
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "automatic": true,
+      "dayBrightness": 85,
+      "nightBrightness": 25,
+      "ambientGain": 0,
+      "offsetPercent": 0
+    }
+  }
+}

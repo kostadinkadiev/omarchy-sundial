@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+# One-shot hardware probe. Emits a single JSON line describing the backlight
+# device and the best available ambient light sensor, or a null sensor when the
+# machine has none.
+#
+# Deliberately one-shot: the service runs this once at startup and then reads
+# sysfs directly through Quickshell's FileView, so the steady state costs zero
+# subprocesses. Run it by hand to see what this plugin thinks your hardware is:
+#
+#   ~/.config/omarchy/plugins/kokd.adaptive-brightness/bin/ab-probe | jq
+
+set -uo pipefail
+
+backlight_device=""
+backlight_max=0
+sensor_path=""
+sensor_kind="none"
+sensor_scale=1
+sensor_offset=0
+
+for device in /sys/class/backlight/*/; do
+  [[ -r "$device/max_brightness" ]] || continue
+  backlight_device=$(basename "$device")
+  backlight_max=$(<"$device/max_brightness")
+  # Prefer an internal panel when several exist.
+  [[ $backlight_device == *backlight* ]] && break
+done
+
+# Tier 1: acpi-als with in_illuminance_input, already in lux.
+for name_file in /sys/bus/iio/devices/iio:device*/name; do
+  [[ -r "$name_file" ]] || continue
+  [[ "$(<"$name_file")" == "acpi-als" ]] || continue
+  device=${name_file%/name}
+  [[ -r "$device/in_illuminance_input" ]] || continue
+  sensor_path="$device/in_illuminance_input"
+  sensor_kind="acpi"
+  break
+done
+
+# Tier 2: any IIO device exposing raw illuminance plus a scale factor.
+if [[ -z $sensor_path ]]; then
+  for name_file in /sys/bus/iio/devices/iio:device*/name; do
+    [[ -r "$name_file" ]] || continue
+    device=${name_file%/name}
+    if [[ -r "$device/in_illuminance_input" ]]; then
+      sensor_path="$device/in_illuminance_input"
+      sensor_kind="acpi"
+      break
+    fi
+    [[ -r "$device/in_illuminance_raw" ]] || continue
+    sensor_path="$device/in_illuminance_raw"
+    sensor_kind="hid"
+    [[ -r "$device/in_illuminance_scale" ]] && sensor_scale=$(<"$device/in_illuminance_scale")
+    [[ -r "$device/in_illuminance_offset" ]] && sensor_offset=$(<"$device/in_illuminance_offset")
+    break
+  done
+fi
+
+error=""
+[[ -n $backlight_device ]] || error="no readable backlight under /sys/class/backlight"
+
+jq -cn \
+  --arg device "$backlight_device" \
+  --argjson max "${backlight_max:-0}" \
+  --arg path "$sensor_path" \
+  --arg kind "$sensor_kind" \
+  --argjson scale "${sensor_scale:-1}" \
+  --argjson offset "${sensor_offset:-0}" \
+  --arg error "$error" \
+  '{backlight: {device: $device, max: $max}, sensor: {path: $path, kind: $kind, scale: $scale, offset: $offset}, error: $error}'
