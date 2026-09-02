@@ -116,7 +116,11 @@ shell's storage rules. All are editable from the popup.
 | `dayBrightness` | `85` | Flat brightness with the sun up |
 | `nightBrightness` | `25` | Flat brightness after civil twilight |
 | `ambientGain` | `0` | How far the sensor may pull away from the sun curve |
-| `offsetPercent` | `0` | Your standing preference, applied everywhere |
+| `offsetPercent` | `0` | A flat shift applied to the whole curve |
+
+`offsetPercent` has no slider in the popup: with both curve anchors already
+exposed, a third "shift everything" control says nothing the anchors cannot.
+It stays in the schema because the learned-override work will drive it.
 
 ## IPC
 
@@ -146,8 +150,20 @@ which `qmllint` has no way to reproduce — so it emits a cascade of "was not
 found" warnings and one spurious inheritance cycle. Read past those; warnings
 that are *not* about a missing `qs.*` type are real.
 
-Saving any file under `~/.config/omarchy/plugins/` hot-reloads the plugin, so
-the edit loop needs no restart. `omarchy-shell shell rescanPlugins` forces one.
+Saving `Panel.qml` hot-reloads it, so widget work needs no restart.
+
+**`Service.qml` does not hot-reload.** The shell instantiates a `service`
+plugin once and `_syncServices` skips any id already in `_services`, so neither
+saving the file, nor `omarchy-shell shell rescanPlugins`, nor a full
+disable/enable cycle re-creates it — the old instance keeps running, with its
+old IPC targets still registered. After editing the service:
+
+```sh
+omarchy-restart-shell
+```
+
+Running stale service code while believing a change took effect is the easiest
+way to lose an hour on this plugin.
 
 ## Roadmap
 

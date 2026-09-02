@@ -22,7 +22,6 @@ Panel {
   readonly property string phase: backend ? backend.phase : "unknown"
   readonly property string locationName: backend ? backend.locationName : ""
   readonly property int ambientGain: backend ? backend.ambientGain : 0
-  readonly property int offsetPercent: backend ? backend.offsetPercent : 0
   readonly property int dayBrightness: backend ? backend.dayBrightness : 85
   readonly property int nightBrightness: backend ? backend.nightBrightness : 25
   readonly property bool hasLocation: backend ? isFinite(backend.latitude) && isFinite(backend.longitude) : false
@@ -77,7 +76,11 @@ Panel {
     anchors.fill: parent
     bar: root.bar
     text: root.automatic ? "󰃠" : "󰃞"
-    active: root.automatic
+    // bar.active is the theme's attention colour — shell.toml reserves it for
+    // "modules calling attention to themselves (recording, alerts, updates)".
+    // Tracking the sun is the normal state and earns no highlight; being
+    // paused, or sitting on a manual override, is worth noticing.
+    active: !root.automatic || root.manualOverride
     tooltipText: root.automatic
       ? "Adaptive brightness · " + root.current + "% · " + root.phase
       : "Adaptive brightness paused"
@@ -210,29 +213,18 @@ Panel {
           onClicked: if (root.backend) root.backend.resume()
         }
 
-        Button {
+        Text {
           visible: !root.hasLocation
           width: parent.width
-          text: "Set your location to enable the sun curve"
-          foreground: root.barForeground
-          fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
-          bordered: true
-          enabled: false
+          text: "No location set, so there is no sun to follow. Set one with:\n"
+            + "omarchy-weather-location --set \"City\" 41.9965,21.4314"
+          color: root.barForeground
+          font.family: root.bar ? root.bar.fontFamily : Style.font.family
+          font.pixelSize: Style.font.caption
+          wrapMode: Text.WordWrap
         }
 
         PanelSeparator { foreground: root.barForeground }
-
-        LabeledSlider {
-          title: "BRIGHTNESS PREFERENCE"
-          value: root.offsetPercent
-          minimum: -30
-          maximum: 30
-          tickCount: 7
-          suffix: "%"
-          showPlus: true
-          enabled: root.backend !== null
-          onCommitted: function(value) { root.persistSetting("offsetPercent", value) }
-        }
 
         LabeledSlider {
           title: "DAYTIME BRIGHTNESS"
