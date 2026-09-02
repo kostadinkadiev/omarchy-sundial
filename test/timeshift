@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+# Put the plugin into any solar phase, right now, without touching the clock.
+#
+# Solar elevation is a function of time *and* place, so instead of faking the
+# time -- which would drag TLS, systemd timers and every other clock-dependent
+# thing on the machine with it -- this moves the location to a longitude where
+# the sun is currently doing what you want to watch. Everything downstream is
+# real: the same weather.json the plugin reads in production, the same FileView
+# watching it, the same service, the same backlight.
+#
+#   test/timeshift day        the sun high overhead
+#   test/timeshift golden     the sun between 0 and 10 degrees
+#   test/timeshift dusk       civil twilight, the middle of the ramp
+#   test/timeshift night      well below the horizon
+#   test/timeshift sweep      walk the whole ramp, day -> night, and report
+#
+# The original location is restored on exit, including on Ctrl-C.
+
+set -uo pipefail
+
+PLUGIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+WEATHER_FILE="$HOME/.local/state/omarchy/settings/weather.json"
+BACKUP="$(mktemp)"
+HAD_WEATHER=0
+IPC="kokd.sundial-backend"
+
+[[ -r "$WEATHER_FILE" ]] && { cp "$WEATHER_FILE" "$BACKUP"; HAD_WEATHER=1; }
+
+restore() {
+  if (( HAD_WEATHER )); then cp "$BACKUP" "$WEATHER_FILE"
+  else rm -f "$WEATHER_FILE"
+  fi
+  rm -f "$BACKUP"
+  echo
+  echo "location restored"
+}
+trap restore EXIT INT TERM
+
+# Find a longitude where the sun sits at the requested elevation right now, at
+# the latitude the user actually lives at so the ramp geometry is theirs.
+longitude_for() {
+  node -e '
+    const fs = require("fs"), vm = require("vm"), path = require("path");
+    const ctx = vm.createContext({ Math, Date, isFinite, Number, String, JSON });
+    vm.runInContext(fs.readFileSync(path.join(process.argv[1], "lib/Solar.js"), "utf8"), ctx);
+    const lat = Number(process.argv[2]), want = Number(process.argv[3]);
+    const now = new Date();
+    let best = null;
+    for (let lon = -180; lon <= 180; lon += 0.25) {
+      const elev = ctx.elevation(now, lat, lon);
+      const err = Math.abs(elev - want);
+      if (best === null || err < best.err) best = { lon, elev, err };
+    }
+    console.log(best.lon.toFixed(2), best.elev.toFixed(2));
+  ' "$PLUGIN_DIR" "$1" "$2"
+}
+
+home_latitude() {
+  jq -r '.latitude // 45' "$BACKUP" 2>/dev/null || echo 45
+}
+
+place_at() {
+  local lat="$1" elev="$2" read_lon read_elev
+  read -r read_lon read_elev < <(longitude_for "$lat" "$elev")
+  jq -n --arg n "timeshift ${elev}deg" --argjson la "$lat" --argjson lo "$read_lon" \
+    '{name: $n, latitude: $la, longitude: $lo}' > "$WEATHER_FILE"
+  echo "$read_elev"
+}
+
+status() { omarchy-shell "$IPC" status; }
+
+report() {
+  status | jq -r '"  elevation \(.elevation)  phase \(.phase)  target \(.target)%  current \(.current)%  learned \(.learnedOffset)"'
+}
+
+case "${1:-sweep}" in
+  day)    ELEVS=(35) ;;
+  golden) ELEVS=(5) ;;
+  dusk)   ELEVS=(-3) ;;
+  night)  ELEVS=(-25) ;;
+  sweep)  ELEVS=(35 20 12 8 4 1 -1 -3 -5 -7 -10 -15 -25) ;;
+  *)      ELEVS=("$1") ;;
+esac
+
+LAT="$(home_latitude)"
+echo "latitude $LAT, walking the sun to: ${ELEVS[*]} degrees"
+echo
+
+for want in "${ELEVS[@]}"; do
+  actual="$(place_at "$LAT" "$want")"
+  printf 'sun %6s deg (asked %s)\n' "$actual" "$want"
+  sleep 5
+  report
+done
