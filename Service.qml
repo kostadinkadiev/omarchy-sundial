@@ -52,6 +52,13 @@ Item {
   // horizon at this time of year.
   property real nextEventTime: 0
   property bool nextEventRising: false
+
+  // Epoch milliseconds until which the schedule is held off, 0 for not paused.
+  // Distinct from `automatic: false`, which is indefinite and has to be undone
+  // by hand: this is "leave me alone tonight", and it ends on its own. Stored
+  // rather than kept in memory so a shell restart does not quietly resume.
+  property real pausedUntil: 0
+  readonly property bool paused: pausedUntil > 0
   readonly property string phase: Solar.phase(elevation)
   readonly property string phaseShort: Solar.phaseShort(elevation)
   readonly property bool ambientActive: hasSensor && ambientGain > 0
@@ -154,13 +161,20 @@ Item {
     // Taking over again starts from wherever the screen is now. Anything the
     // user did while it was paused was them driving, not them correcting the
     // schedule, so it adopts that value instead of learning from it.
-    if (automatic && !wasAutomatic) adopt()
+    if (automatic && !wasAutomatic) {
+      // Switching it on by hand is an explicit "be active now", which outranks
+      // any pause still running.
+      if (paused) endPause()
+      adopt()
+    }
     dayBrightness = clampSetting(settings.dayBrightness, 10, 100, 85)
     nightBrightness = clampSetting(settings.nightBrightness, 1, 100, 25)
     ambientGainExplicit = settings.ambientGain === undefined || settings.ambientGain === null
       ? -1 : clampSetting(settings.ambientGain, 0, 60, 0)
     offsetPercent = clampSetting(settings.offsetPercent, -30, 30, 0)
     learned = Curve.learnedTable(settings.learned)
+    var storedPause = Number(settings.pausedUntil)
+    pausedUntil = isFinite(storedPause) && storedPause > Date.now() ? storedPause : 0
     settingsReady = true
     evaluate()
   }
@@ -181,6 +195,7 @@ Item {
   function updateElevation() {
     elevation = Solar.elevation(new Date(), latitude, longitude)
     updateSunEvents(false)
+    checkPause()
   }
 
   // Recomputed only once the last one has passed, so the search runs about
@@ -224,6 +239,10 @@ Item {
     target = Curve.target(elevation, ambientGain > 0 ? lux : null, curveSettings())
 
     if (!automatic) return
+
+    // Held off until morning. The target above stays current so the panel can
+    // still say what it would have done.
+    if (paused) return
 
     // Nothing may be written on top of a reading we could not attribute.
     if (attributionPending) return
@@ -297,7 +316,9 @@ Item {
     currentRaw = raw
     if (lastWrittenRaw < 0) lastWrittenRaw = raw
 
-    if (!automatic || !differs) {
+    // Paused means the user is driving, exactly as switched-off does, so what
+    // they set tonight is not a correction to a schedule that is not running.
+    if (!automatic || paused || !differs) {
       attributionPending = false
       return
     }
@@ -345,6 +366,45 @@ Item {
     lastWrittenRaw = currentRaw
   }
 
+  // The next time the sun comes up, which is not always the next thing it does
+  // -- ask in the morning and the next crossing is a sunset.
+  function nextSunrise() {
+    if (!isFinite(latitude) || !isFinite(longitude)) return 0
+    var at = new Date()
+    for (var i = 0; i < 3; i++) {
+      var crossing = Solar.nextHorizonCrossing(at, latitude, longitude)
+      if (!crossing) return 0
+      if (crossing.rising) return crossing.time.getTime()
+      at = crossing.time
+    }
+    return 0
+  }
+
+  // Hold the schedule off until morning.
+  //
+  // The off switch already exists, so this earns its place by ending on its
+  // own: "leave me alone tonight" is a different request from "stop", and
+  // answering it with the toggle means remembering to undo it tomorrow. Taken
+  // from key-tone's Night Light plugin, which solves the same problem for
+  // colour temperature with one button and no timer to explain.
+  function pauseUntilSunrise() {
+    var sunrise = nextSunrise()
+    if (sunrise <= 0) return
+    pausedUntil = sunrise
+    persist("pausedUntil", sunrise)
+  }
+
+  function endPause() {
+    if (!paused) return
+    pausedUntil = 0
+    persist("pausedUntil", 0)
+    adopt()
+  }
+
+  function checkPause() {
+    if (paused && Date.now() >= pausedUntil) endPause()
+  }
+
   function forget() {
     learned = Curve.forgetLearned()
     persistLearned()
@@ -354,12 +414,29 @@ Item {
   // shell.json is the only store, per the shell's plugin rules, and writing it
   // costs a subprocess -- so a held brightness key, which absorbs afresh on
   // every poll, coalesces into one write after the key comes up.
-  function persistLearned() {
+  //
+  // Queued because a pause and a learned offset can want writing at the same
+  // moment, and one Process cannot carry both: the second would silently
+  // replace the first mid-flight.
+  property var persistQueue: []
+
+  function persist(key, value) {
+    persistQueue.push([key, value])
+    runPersistQueue()
+  }
+
+  function runPersistQueue() {
+    if (persistProcess.running || persistQueue.length === 0) return
+    var item = persistQueue.shift()
     persistProcess.command = [
       "omarchy-shell", "shell", "setBarWidget", pluginId,
-      "learned", JSON.stringify(learned), "{}"
+      String(item[0]), JSON.stringify(item[1]), "{}"
     ]
     persistProcess.running = true
+  }
+
+  function persistLearned() {
+    persist("learned", learned)
   }
 
   Timer {
@@ -372,6 +449,7 @@ Item {
   Process {
     id: persistProcess
     stdout: StdioCollector { waitForEnd: true }
+    onRunningChanged: if (!running) Qt.callLater(root.runPersistQueue)
   }
 
   function tick() {
@@ -538,6 +616,8 @@ Item {
         learnedOffset: Math.round(root.learnedOffset * 10) / 10,
         phaseKey: root.phaseKey,
         learnedBand: root.learnedBand,
+        paused: root.paused,
+        pausedUntil: root.paused ? new Date(root.pausedUntil).toISOString() : null,
         nextEvent: root.nextEventTime > 0
           ? { at: new Date(root.nextEventTime).toISOString(), rising: root.nextEventRising }
           : null,
@@ -550,6 +630,18 @@ Item {
     function forget(): string {
       root.forget()
       return "forgot everything it had learned"
+    }
+
+    function pause(): string {
+      root.pauseUntilSunrise()
+      return root.paused
+        ? "paused until " + new Date(root.pausedUntil).toISOString()
+        : "no sunrise to wait for"
+    }
+
+    function resume(): string {
+      root.endPause()
+      return "following the sun again"
     }
 
   }

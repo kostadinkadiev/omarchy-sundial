@@ -13,19 +13,43 @@ dark room at noon and it still dims.
 It works on machines with no light sensor at all — including desktops — because
 the sun curve is the whole schedule there.
 
-Omarchy already has ambient-light plugins, and good ones —
+Omarchy has a lot of this already, and it is worth being precise about what is
+left.
+
+**Sun-scheduled colour temperature** is a solved and crowded problem. At least
+six plugins do it — [key-tone](https://github.com/key-tone/omarchy-nightlight)
+with a Kelvin slider and presets,
+[matt-shearing](https://github.com/matt-shearing/omarchy-nightlight-auto) with
+a blue-light ramp anchored to local sunset,
+[sunshine144](https://github.com/sunshine144/solar-nightlight) computing civil
+and nautical dusk from NOAA solar position and checking it against published
+almanac times, plus
+[jeremylanger](https://github.com/jeremylanger/omarchy-nightlight),
+[pnaskardev](https://github.com/pnaskardev/omarchy-nightlight-scheduler) and
+others. They all drive `hyprsunset`. Sundial does not compete with any of them
+and never will: it does not touch colour.
+
+**Ambient-light brightness** is also taken, by good plugins.
 [brukberhane](https://github.com/brukberhane/omarchy-auto-brightness) learns
 per lux bucket and drives external displays over DDC,
 [realgbbb](https://github.com/realgbbb/auto-brightness) adds the keyboard
 backlight and refuses to learn on principle, and
 [huangzuo](https://github.com/huangzuo/macbook-auto-brightness-plugin) keeps it
-small for Intel MacBooks. Each does something this does not.
+small for Intel MacBooks. Each does something Sundial does not.
 
-What none of them have is time. All three are pure ALS and need a sensor to do
-anything at all; none of them knows where the sun is. Sundial schedules on
-solar elevation, so it has an opinion about your screen at 22:00 in December
-whether or not your laptop can see the room — and where there is a sensor, it
-refines that opinion rather than replacing it.
+What is left is the intersection. The colour plugins know where the sun is but
+never touch the backlight; the brightness plugins drive the backlight but are
+pure ALS and need a sensor to do anything at all. **Nobody has pointed a solar
+schedule at screen brightness.** That is the whole of the gap — a narrower
+claim than "nothing here knows what time it is", which would be untrue, and
+demonstrably so six times over.
+
+Two things follow from it. Sundial works on a machine with no light sensor,
+which none of the brightness plugins do. And where there is a sensor, the sun
+stays the schedule and the sensor corrects it, rather than being the input.
+
+It pairs with a night light plugin rather than replacing one. Brightness here,
+colour there, both following the same sun.
 
 ## Status
 
@@ -202,6 +226,12 @@ The bar icon is the whole feature:
 | **Click** | on / off. Dimmed means off, exactly like Night Light and DND |
 | **Right-click** | the popup |
 
+The popup carries **Pause until sunrise**, which is a different request from
+switching it off: it ends by itself in the morning, so "leave me alone
+tonight" does not have to be undone tomorrow. Borrowed from key-tone's Night
+Light, which answers the same question for colour with one button and no timer
+to explain.
+
 Adjusting is the brightness keys, or the Monitor widget's scroll — both write
 the backlight through `brightnessctl`, which is what this watches. There is no
 control of its own for that, and briefly there was: a scroll handler on this
@@ -256,6 +286,7 @@ shell's storage rules. All are editable from the popup.
 | `ambientGain` | sensor: `30`, none: `0` | How far room light may pull away from the sun curve |
 | `offsetPercent` | `0` | A flat shift applied to the whole curve |
 | `learned` | all zero | Per-band offsets, written by adjusting. Not hand-edited |
+| `pausedUntil` | `0` | Epoch ms the overnight hold ends. Written by the panel |
 
 `learned` is maintained by pressing the brightness keys;
 the popup's Forget button clears it. The others have no
@@ -267,6 +298,8 @@ everyone else.
 ```sh
 omarchy-shell kokd.sundial-backend status | jq
 omarchy-shell kokd.sundial-backend forget     # discard what it has learned
+omarchy-shell kokd.sundial-backend pause      # hold off until sunrise
+omarchy-shell kokd.sundial-backend resume     # and stop holding off
 omarchy-shell kokd.sundial-backend refresh
 
 omarchy-shell kokd.sundial toggle    # the popup itself
@@ -310,10 +343,9 @@ way to lose an hour on this plugin.
 - Learning keyed on room light as well as sun position, so a correction made
   with the blinds shut is not applied when they are open. Solar band alone was
   the right first cut because it exists on every machine, sensor or not.
-- Adaptive colour temperature on the same elevation curve, and True Tone-style
-  white point from the colour sensor where one exists. Held back because
-  `omarchy.nightlight` already owns `hyprsunset` and two writers would fight
-  over it; this will require explicitly handing over.
+- ~~Adaptive colour temperature~~. Dropped, not deferred. Six plugins already
+  schedule `hyprsunset` on the sun and do it well; a seventh writer fighting
+  them for one gamma channel helps nobody. Install one of those alongside this.
 - External monitors over DDC/CI, with coarse infrequent steps — DDC writes are
   slow and monitor EEPROMs have finite write endurance.
 

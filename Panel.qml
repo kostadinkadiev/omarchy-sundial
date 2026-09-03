@@ -38,6 +38,10 @@ Panel {
   readonly property string learnedBand: backend ? backend.learnedBand : ""
   readonly property real learnedOffset: backend ? backend.learnedOffset : 0
   readonly property bool hasLearned: backend ? backend.hasLearned : false
+  readonly property bool paused: backend ? backend.paused : false
+  readonly property real pausedUntil: backend ? backend.pausedUntil : 0
+  readonly property string pausedUntilText: paused
+    ? Qt.formatTime(new Date(pausedUntil), twelveHour ? "h:mm AP" : "HH:mm") : ""
   readonly property bool ambientActive: backend ? backend.ambientActive : false
   readonly property real ambientDelta: backend ? backend.ambientDelta : 0
   readonly property int current: backend ? backend.current : 0
@@ -91,6 +95,7 @@ Panel {
     hasSensor: root.hasSensor,
     learnedBand: root.learnedBand,
     learnedOffset: root.learnedOffset,
+    pausedUntilText: root.pausedUntilText,
     ambientActive: root.ambientActive,
     ambientDelta: root.ambientDelta
   })
@@ -137,12 +142,15 @@ Panel {
     // There was a third — the accent for an active manual override — which is
     // gone with the override itself. Nothing about this plugin is urgent, and
     // the accent is reserved for things that are (recording, alerts).
-    dimmed: !root.automatic
-    tooltipText: root.automatic
-      ? "Sundial · " + root.current + "% · " + root.phase
-        + (root.sunEventText ? " · " + root.sunEventText : "")
-        + "\nRight-click for details"
-      : "Sundial paused\nClick to resume"
+    // Paused reads as off, because that is what it is until morning.
+    dimmed: !root.automatic || root.paused
+    tooltipText: !root.automatic
+      ? "Sundial off\nClick to switch on"
+      : root.paused
+        ? "Sundial paused until " + root.pausedUntilText + "\nRight-click for details"
+        : "Sundial · " + root.current + "% · " + root.phase
+          + (root.sunEventText ? " · " + root.sunEventText : "")
+          + "\nRight-click for details"
 
     // Left is the feature, which is the same bargain the rest of the row makes:
     // one press does the thing, and the popup is somewhere else. An earlier
@@ -248,6 +256,32 @@ Panel {
           font.family: root.bar ? root.bar.fontFamily : Style.font.family
           font.pixelSize: Style.font.caption
           wrapMode: Text.WrapAnywhere
+        }
+
+        // Only when there is a sunrise to wait for, which rules out a polar
+        // summer and a machine with no location.
+        Button {
+          visible: root.automatic && !root.paused && root.nextEventTime > 0
+          enabled: root.backend !== null
+          width: parent.width
+          text: "Pause until sunrise"
+          iconText: "󰖔"
+          foreground: root.barForeground
+          fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+          bordered: true
+          onClicked: if (root.backend) root.backend.pauseUntilSunrise()
+        }
+
+        Button {
+          visible: root.paused
+          enabled: root.backend !== null
+          width: parent.width
+          text: "Resume now"
+          iconText: "󰃠"
+          foreground: root.barForeground
+          fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+          bordered: true
+          onClicked: if (root.backend) root.backend.endPause()
         }
 
         Toggle {

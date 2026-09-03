@@ -312,10 +312,18 @@ check("bright room is explained",
   Status.sentence(withState({ ambientDelta: 0.3 })).indexOf("bright") !== -1);
 check("a small delta is not dressed up as dark",
   Status.sentence(withState({ ambientDelta: -0.02 })).indexOf("dark") === -1);
-check("paused says so",
-  Status.sentence(withState({ automatic: false })).indexOf("Paused") === 0);
-check("paused outranks the room",
+check("switched off says so",
+  Status.sentence(withState({ automatic: false })).indexOf("Off.") === 0);
+check("switched off outranks the room",
   Status.sentence(withState({ automatic: false, ambientDelta: -0.9 })).indexOf("dark") === -1);
+check("an overnight pause names the hour it ends",
+  Status.sentence(withState({ pausedUntilText: "06:01" })).indexOf("sunrise at 06:01") !== -1);
+check("a pause is worded differently from being switched off",
+  Status.sentence(withState({ pausedUntilText: "06:01" }))
+    !== Status.sentence(withState({ automatic: false })));
+check("no location still outranks a pause",
+  Status.sentence(withState({ hasLocation: false, pausedUntilText: "06:01" }))
+    .indexOf("no sun to follow") !== -1);
 check("what was learned is said out loud",
   Status.sentence(withState({ learnedBand: "night", learnedOffset: -12 }))
     .indexOf("You keep nights 12% dimmer") !== -1);
@@ -331,7 +339,7 @@ check("rounding is not reported as a preference",
 check("learning is not claimed without a sun angle",
   Status.sentence(withState({ learnedBand: "", learnedOffset: -12 }))
     .indexOf("You keep") === -1);
-check("paused says nothing about learning",
+check("being switched off says nothing about learning",
   Status.sentence(withState({ automatic: false, learnedBand: "night", learnedOffset: -12 }))
     .indexOf("You keep") === -1);
 check("no location outranks everything",
