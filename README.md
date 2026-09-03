@@ -13,10 +13,39 @@ dark room at noon and it still dims.
 It works on machines with no light sensor at all — including desktops — because
 the sun curve is the whole schedule there.
 
-Omarchy already has ambient-light plugins, and good ones. What none of them
-have is time: they are pure ALS and require a sensor to do anything. Sundial
-schedules on the sun's position, so it has an opinion about your screen at
-22:00 in December whether or not your laptop can see the room.
+Omarchy already has ambient-light plugins, and good ones —
+[brukberhane](https://github.com/brukberhane/omarchy-auto-brightness) learns
+per lux bucket and drives external displays over DDC,
+[realgbbb](https://github.com/realgbbb/auto-brightness) adds the keyboard
+backlight and refuses to learn on principle, and
+[huangzuo](https://github.com/huangzuo/macbook-auto-brightness-plugin) keeps it
+small for Intel MacBooks. Each does something this does not.
+
+What none of them have is time. All three are pure ALS and need a sensor to do
+anything at all; none of them knows where the sun is. Sundial schedules on
+solar elevation, so it has an opinion about your screen at 22:00 in December
+whether or not your laptop can see the room — and where there is a sensor, it
+refines that opinion rather than replacing it.
+
+## Status
+
+Version 0.1.0, and honestly early. What has actually been exercised:
+
+- The curve and the solar maths, across a full day at one-minute resolution,
+  from the equator to 60 degrees, at solstice and equinox (`test/day.js`)
+- Every solar phase on real hardware, by moving the location rather than the
+  clock (`test/timeshift`)
+- The ambient path end to end against real readings at 0, 1, 130 and 236 lux
+- Learning: taught, held, persisted, forgotten, and blended across bands
+
+What has not:
+
+- **The `acpi` sensor tier.** Development hardware is HID-tier, so the six
+  lines that read `in_illuminance_input` have unit tests and no real device.
+  If you have an Intel MacBook, you are the first.
+- A dawn or dusk observed live rather than simulated. The geometry is tested;
+  the geometry plus a room genuinely darkening is not.
+- External monitors. Internal panel only — see Roadmap.
 
 ## Requirements
 

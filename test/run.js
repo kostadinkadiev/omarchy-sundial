@@ -72,9 +72,19 @@ check("smoothstep is flat at the edges",
   Math.abs(Curve.solarBaseline(9.9, opts) - Curve.solarBaseline(10, opts)) < 0.5);
 
 check("lux score is 0 in the dark", Curve.luxScore(0) === 0);
-check("lux score is 1 at the ceiling", Curve.luxScore(10000) === 1);
+check("lux score is 1 at the ceiling", Curve.luxScore(2000) === 1);
+check("outdoor light saturates rather than overflowing", Curve.luxScore(50000) === 1);
+// The number that made the default wrong: an ordinary lit room at solar noon.
+check("an ordinary room is not read as a cave", function () {
+  var indoors = Curve.target(50, 200, { ambientGain: 30 });
+  return indoors >= 74 && indoors <= 80;
+}(), "200 lux at noon");
+// Approximately, not exactly: the +1 that keeps log(0) finite also bends the
+// scale where lux is small, and log10(11) is 4% above log10(10). The tolerance
+// has to carry that -- it was 0.01 when the ceiling was 10000, and the same
+// absolute error is a larger share of a smaller range.
 check("lux score is logarithmic",
-  Math.abs((Curve.luxScore(100) - Curve.luxScore(10)) - (Curve.luxScore(1000) - Curve.luxScore(100))) < 0.01);
+  Math.abs((Curve.luxScore(100) - Curve.luxScore(10)) - (Curve.luxScore(1000) - Curve.luxScore(100))) < 0.02);
 
 check("zero gain ignores the sensor", Curve.blend(50, 9999, 0, 0) === 50);
 check("bright room at night raises brightness", Curve.blend(25, 5000, -20, 40) > 25);
