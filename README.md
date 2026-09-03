@@ -13,21 +13,29 @@ dark room at noon and it still dims.
 It works on machines with no light sensor at all — including desktops — because
 the sun curve is the whole schedule there.
 
-Omarchy has a lot of this already, and it is worth being precise about what is
-left.
+![The Sundial popup: the state in a sentence, and one button](preview.png)
 
-**Sun-scheduled colour temperature** is a solved and crowded problem. At least
-six plugins do it — [key-tone](https://github.com/key-tone/omarchy-nightlight)
+Omarchy has a lot of this already, and it is worth being precise about what is
+left. I went through the marketplace catalogue — 2,186 listed plugins.
+Twenty-seven mention brightness, backlight or lux. Twenty-seven mention the
+sun, night light or colour temperature. Four mention both, and of those
+exactly one moves screen brightness on a schedule.
+
+**Sun-scheduled colour temperature** is a solved and crowded problem. Six
+plugins on the marketplace do it — [key-tone](https://github.com/key-tone/omarchy-nightlight)
 with a Kelvin slider and presets,
 [matt-shearing](https://github.com/matt-shearing/omarchy-nightlight-auto) with
-a blue-light ramp anchored to local sunset,
-[sunshine144](https://github.com/sunshine144/solar-nightlight) computing civil
-and nautical dusk from NOAA solar position and checking it against published
-almanac times, plus
+a blue-light ramp anchored to local sunset, plus
 [jeremylanger](https://github.com/jeremylanger/omarchy-nightlight),
-[pnaskardev](https://github.com/pnaskardev/omarchy-nightlight-scheduler) and
-others. They all drive `hyprsunset`. Sundial does not compete with any of them
-and never will: it does not touch colour.
+[marioxabel](https://github.com/marioxabel/omarchy-hyprsunset),
+[Darksam08](https://github.com/Darksam08/Set-your-nightlight) and
+[Varantha](https://github.com/Varantha/omarchy-sunsetr) — and more off it,
+including [sunshine144](https://github.com/sunshine144/solar-nightlight), which
+computes civil and nautical dusk from NOAA solar position and checks it against
+published almanac times. They all drive gamma. Not one of them touches the
+backlight: key-tone's four source files contain zero occurrences of
+`brightnessctl`, `backlight`, `illuminance` or `lux`. Sundial does not compete
+with any of them and never will — it does not touch colour. Run both.
 
 **Ambient-light brightness** is also taken, by good plugins.
 [brukberhane](https://github.com/brukberhane/omarchy-auto-brightness) learns
@@ -35,18 +43,33 @@ per lux bucket and drives external displays over DDC,
 [realgbbb](https://github.com/realgbbb/auto-brightness) adds the keyboard
 backlight and refuses to learn on principle, and
 [huangzuo](https://github.com/huangzuo/macbook-auto-brightness-plugin) keeps it
-small for Intel MacBooks. Each does something Sundial does not.
+small for Intel MacBooks. Each does something Sundial does not. All three are
+pure ALS, though: no sensor, no plugin. `huangzuo` will not start without an
+IIO device named literally `acpi-als`.
 
-What is left is the intersection. The colour plugins know where the sun is but
-never touch the backlight; the brightness plugins drive the backlight but are
-pure ALS and need a sensor to do anything at all. **Nobody has pointed a solar
-schedule at screen brightness.** That is the whole of the gap — a narrower
+**Brightness on a schedule** has exactly one occupant, and it is the closest
+thing to this on the marketplace:
+[Veilleuse](https://github.com/ZnOw01/Veilleuse). It controls brightness,
+colour temperature and gamma, drives named external monitors, ships in two
+languages with CI, and moves display values at day/night boundaries. Those
+boundaries are wall-clock times you type in — `schedule_utils.py` validates
+`HH:MM`, defaults to `06:00` and `15:30`, and does its arithmetic modulo 1440.
+There is no latitude anywhere in the repository. It cannot know that 15:30 is
+dark in December and bright in June, which is the one thing the schedule needs
+to know.
+
+That is the gap, and it is the whole of it. **Nobody has pointed a solar
+schedule at screen brightness.** The colour plugins know where the sun is and
+never touch the backlight. The brightness plugins drive the backlight and need
+a sensor to do anything at all. The one scheduler that does drive brightness
+asks you what time it gets dark instead of working it out. That is a narrower
 claim than "nothing here knows what time it is", which would be untrue, and
-demonstrably so six times over.
+demonstrably so a dozen times over.
 
-Two things follow from it. Sundial works on a machine with no light sensor,
-which none of the brightness plugins do. And where there is a sensor, the sun
-stays the schedule and the sensor corrects it, rather than being the input.
+Three things follow. Sundial works on a machine with no light sensor, which
+none of the brightness plugins do. It has nothing to configure, which the one
+scheduler does. And where there is a sensor, the sun stays the schedule and the
+sensor corrects it, rather than being the input.
 
 It pairs with a night light plugin rather than replacing one. Brightness here,
 colour there, both following the same sun.
