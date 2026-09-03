@@ -25,6 +25,8 @@ running() {
 }
 
 collect() {
+  echo $$ > "$PIDFILE"
+  trap 'rm -f "$PIDFILE"' EXIT
   [[ -s "$LOG" ]] || printf 'time\tepoch\televation\tphase\tlux\ttarget\tcurrent\tlearned_offset\tband\tautomatic\n' > "$LOG"
   while true; do
     local s
@@ -40,13 +42,26 @@ collect() {
 }
 
 case "${1:-status}" in
+  __collect)
+    collect
+    exit 0
+    ;;
   start)
     if running; then echo "already running (pid $(cat "$PIDFILE"))"; exit 0; fi
-    collect >/dev/null 2>&1 &
-    echo $! > "$PIDFILE"
-    disown 2>/dev/null
-    echo "logging to $LOG (pid $(cat "$PIDFILE"))"
-    echo "leave it overnight; test/soak review reads it back"
+    # setsid, not just backgrounding. A plain `cmd &` stays in this shell's
+    # process group and dies with whatever launched it -- which is how the
+    # first attempt at this lost the night: it was started from a terminal that
+    # later exited, and took the logger with it. A new session detaches it from
+    # both the process group and the controlling terminal, so it survives the
+    # shell, the terminal and a logout.
+    setsid nohup "$0" __collect >/dev/null 2>&1 < /dev/null &
+    sleep 1
+    if running; then
+      echo "logging to $LOG (pid $(cat "$PIDFILE"))"
+      echo "leave it overnight; test/soak review reads it back"
+    else
+      echo "failed to start" >&2; exit 1
+    fi
     ;;
   stop)
     if running; then kill "$(cat "$PIDFILE")" && echo "stopped"; else echo "not running"; fi
