@@ -177,6 +177,13 @@ bin/ab-locate | jq
 Nothing is written to the backlight until a location resolves, so a machine
 that is offline with no cache is left alone rather than driven to a guess.
 
+None of the three sources is trusted. Coordinates have to be numbers that are
+actually on Earth, and the place name — the only free-form string the plugin
+carries, and the only one that reaches a label — is filtered in the helper,
+filtered again as QML reads it, and rendered with `textFormat: Text.PlainText`
+like every other label in the shell. The request itself is bounded in both time
+and size, and follows no redirects.
+
 ### Sensor
 
 | Tier | Detection | Lux |
@@ -287,7 +294,8 @@ Both targets are namespaced because IPC targets are global to the one
 ## Development
 
 ```sh
-node test/run.js                                   # curve and solar maths
+node test/run.js                                   # curve, solar maths, filters
+test/locate                                        # the location helper, offline
 bash -n bin/ab-probe
 omarchy plugin validate .
 /usr/lib/qt6/bin/qmllint -I "$OMARCHY_PATH/shell" Service.qml Panel.qml

@@ -19,6 +19,7 @@ var Solar = load("Solar.js");
 var Curve = load("Curve.js");
 var Sensor = load("Sensor.js");
 var Status = load("Status.js");
+var Safe = load("Safe.js");
 
 var failures = 0;
 function check(name, condition, detail) {
@@ -351,6 +352,75 @@ check("no sensor stops at the sun",
 check("sun-only stops at the sun",
   Status.sentence(withState({ ambientActive: false, ambientDelta: -0.9 })).indexOf("room") === -1);
 check("never returns empty", Status.sentence({}).length > 0);
+
+// ------------------------------------------------------------------ Safe.js
+// The second of three defences on the one string this plugin does not write
+// itself. bin/ab-locate filters it first (test/locate), Panel.qml renders it
+// with textFormat: Text.PlainText last, and this is what QML applies to the
+// helper's output before believing any of it.
+
+check("keeps an ordinary name", Safe.plain("Skopje") === "Skopje");
+
+// No alphabet is second class. A rule that only understood ASCII would make
+// the panel unreadable for most of the world, which is its own kind of bug.
+var CITIES = ["Скопје", "東京", "L'Aquila",
+  "Saint-Denis", "Washington, D.C.", "Sofia (Sofiya)", "San José",
+  "Ra's al-Khaimah", "Đà Nẵng", "Málaga", "N'Djamena",
+  "القاهرة", "ירושלים"];
+for (var i = 0; i < CITIES.length; i++)
+  check("keeps " + JSON.stringify(CITIES[i]), Safe.plain(CITIES[i]) === CITIES[i]);
+
+// Nothing may come back holding a character that turns a label into markup,
+// or one that is invisible inside it.
+var INVISIBLE = /[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\ufeff]/;
+var PAYLOADS = [
+  "<b>Skopje</b>",
+  "<img src=x onerror=1>",
+  '<img src="file:///etc/passwd">',
+  "<!DOCTYPE html><html>Skopje",
+  "A &amp; B &#60;i&#62;",
+  '<a href="http://example.com">Skopje</a>',
+  "Skopje<br/><span>y</span>",
+  "\u001b[31mSkopje\u001b[0m",
+  "Skopje\u0000\u0007\u007f",
+  "Skopje\u202eelbisivni",
+  "zero\u200bwidth\ufeff",
+  "back\\slash"
+];
+for (var j = 0; j < PAYLOADS.length; j++) {
+  var got = Safe.plain(PAYLOADS[j]);
+  check("no markup survives " + JSON.stringify(PAYLOADS[j]),
+    /[<>&\\\/]/.test(got) === false, got);
+  check("nothing invisible survives " + JSON.stringify(PAYLOADS[j]),
+    INVISIBLE.test(got) === false, JSON.stringify(got));
+}
+
+check("strips the tag, keeps the word", Safe.plain("<b>Skopje</b>") === "bSkopjeb");
+check("collapses a newline rather than fusing the words",
+  Safe.plain("  Skopje\n\tCity  ") === "Skopje City");
+check("collapses the gap a stripped character leaves",
+  Safe.plain("Skopje < City") === "Skopje City");
+check("caps the length", Safe.plain(new Array(300).join("a")).length === 64);
+check("a name that is all markup ends up empty", Safe.plain("<<<>>>") === "");
+check("a non-string is dropped rather than coerced",
+  Safe.plain({ a: 1 }) === "" && Safe.plain(42) === "" && Safe.plain(null) === ""
+    && Safe.plain(undefined) === "");
+check("is idempotent",
+  Safe.plain(Safe.plain("<b>Skopje</b>")) === Safe.plain("<b>Skopje</b>"));
+
+// The sink all of this exists for. A hostile name must reach the sentence as
+// inert text, and must not be able to close a tag or open one.
+var hostile = Safe.plain('<b>Nowhere</b><img src="x" onerror="y">');
+var hostileSentence = Status.sentence({
+  hasLocation: true, automatic: true, locationName: hostile
+});
+check("the sentence carries the cleaned name", hostileSentence.indexOf(hostile) !== -1);
+check("the sentence cannot be turned into markup",
+  /[<>&]/.test(hostileSentence) === false, hostileSentence);
+check("an error string is cleaned on the same path",
+  /[<>&]/.test(Status.sentence({ hasLocation: false,
+    locationError: Safe.plain("<b>offline</b>") })) === false);
+
 
 if (failures) {
   console.error("\n" + failures + " test(s) failed");

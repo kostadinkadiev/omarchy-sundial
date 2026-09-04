@@ -20,31 +20,72 @@ WEATHER_FILE="$HOME/.local/state/omarchy/settings/weather.json"
 CACHE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy/kokd.sundial"
 CACHE_FILE="$CACHE_DIR/location.json"
 
+# None of the three sources is trusted. The weather file is written by another
+# tool, the cache by a previous run, and the IP lookup by a remote service, so
+# all three go through the same filter: coordinates must be numbers that are
+# actually on Earth, and the place name is reduced to the characters a place
+# name is made of.
+#
+# The order inside clean_name matters: whitespace collapses to a single space
+# before anything is deleted, because deleting a newline that sits between two
+# words would fuse them into one.
+#
+# That name is the only free-form string this plugin carries, and it ends up in
+# a label in the panel. Panel.qml renders every label as plain text, which is
+# the defence that matters; this is the second one, so the value is already
+# harmless before QML ever sees it. The allowed set is letters, combining
+# marks and digits in any script, plus the punctuation real place names use —
+# Скопје, 東京, L'Aquila, Washington, D.C. and Sofia (Sofiya) all survive it
+# intact. Sixty-four characters is longer than the longest of them.
+JQ_PRELUDE='
+  def clean_name:
+    (if type == "string" then . else "" end)
+    | gsub("\\s+"; " ")
+    | gsub("[^\\p{L}\\p{M}\\p{N} .,'"'"'’()-]"; "")
+    | gsub(" +"; " ")
+    | sub("^ "; "") | sub(" $"; "")
+    | .[0:64];
+  def on_earth:
+    (.latitude | type) == "number" and (.longitude | type) == "number"
+    and .latitude >= -90 and .latitude <= 90
+    and .longitude >= -180 and .longitude <= 180;
+'
+
 # Emit the file's contents when it carries usable coordinates.
 emit_if_valid() {
   local file="$1"
   [[ -r "$file" ]] || return 1
-  jq -e -c '
-    select((.latitude | type) == "number" and (.longitude | type) == "number")
-    | {name: (.name // ""), latitude, longitude}
+  jq -e -c "$JQ_PRELUDE"'
+    select(on_earth)
+    | {name: (.name | clean_name), latitude, longitude}
   ' "$file" 2>/dev/null
 }
 
 emit_if_valid "$WEATHER_FILE" && exit 0
 emit_if_valid "$CACHE_FILE" && exit 0
 
-response=$(curl -fsS --max-time 8 'https://wttr.in/?format=j1' 2>/dev/null) || {
+# Without -L, curl refuses a redirect rather than following it, so this reads
+# wttr.in or nothing. --max-time bounds how long the answer may take; it does
+# not bound how large it may be, and wttr.in replies over HTTP/2 with no
+# content-length, which leaves --max-filesize with nothing to act on. head -c
+# is the bound that holds in every case: 128 KiB, against a normal response of
+# about 39 KiB. A body cut off at the cap fails the parse below and lands in
+# the same branch as no answer at all, which is the right outcome for a reply
+# that large.
+response=$(curl -fsS --max-time 8 --max-filesize 131072 \
+  'https://wttr.in/?format=j1' 2>/dev/null | head -c 131072) || {
   jq -cn '{error: "no location set and the IP lookup failed"}'
   exit 0
 }
 
-location=$(jq -e -c '
+location=$(jq -e -c "$JQ_PRELUDE"'
   .nearest_area[0]
   | {
-      name: (.areaName[0].value // ""),
+      name: (.areaName[0].value | clean_name),
       latitude: (.latitude | tonumber),
       longitude: (.longitude | tonumber)
     }
+  | select(on_earth)
 ' <<<"$response" 2>/dev/null) || {
   jq -cn '{error: "the IP lookup returned no coordinates"}'
   exit 0

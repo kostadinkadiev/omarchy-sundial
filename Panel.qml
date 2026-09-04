@@ -193,6 +193,7 @@ Panel {
 
           Text {
             id: heroIcon
+            textFormat: Text.PlainText
             text: root.automatic ? "󰃠" : "󰃞"
             color: root.barForeground
             font.family: root.bar ? root.bar.fontFamily : Style.font.family
@@ -203,6 +204,7 @@ Panel {
 
           Text {
             id: heroTitle
+            textFormat: Text.PlainText
             text: "Sundial"
             color: root.barForeground
             font.family: root.bar ? root.bar.fontFamily : Style.font.family
@@ -218,6 +220,7 @@ Panel {
 
           Text {
             id: heroPercent
+            textFormat: Text.PlainText
             text: root.current + "%"
             color: root.barForeground
             font.family: root.bar ? root.bar.fontFamily : Style.font.family
@@ -229,7 +232,17 @@ Panel {
         }
 
         // The whole readout, in one line of English.
+        //
+        // Every Text in this file is PlainText, which is what the rest of the
+        // shell does too -- shell/Ui sets it on every label it owns. It matters
+        // most here, because this sentence is the one string in the plugin that
+        // can carry a value the machine did not choose: the place name, which
+        // comes from the weather widget's location or from an IP lookup. Qt's
+        // default AutoText would sniff that for markup. Setting it on all six
+        // rather than on this one keeps that true after the next edit moves a
+        // string somewhere else.
         Text {
+          textFormat: Text.PlainText
           width: parent.width
           text: root.statusSentence
           color: Qt.darker(root.barForeground, 1.4)
@@ -239,6 +252,7 @@ Panel {
         }
 
         Text {
+          textFormat: Text.PlainText
           visible: root.sunEventText !== ""
           width: parent.width
           text: root.sunEventText.charAt(0).toUpperCase() + root.sunEventText.slice(1)
@@ -249,6 +263,7 @@ Panel {
 
         // Shown only when there is something to do about it.
         Text {
+          textFormat: Text.PlainText
           visible: !root.hasLocation
           width: parent.width
           text: "omarchy-weather-location --set \"City\" 41.9965,21.4314"

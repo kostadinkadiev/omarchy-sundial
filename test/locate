@@ -1,0 +1,139 @@
+#!/usr/bin/env bash
+# bin/ab-locate is the only part of this plugin that reads something a stranger
+# wrote, so it is the only part with a shell test.
+#
+# It runs entirely offline. Each case gets a fresh HOME holding exactly one
+# weather.json, a cache directory that does not exist, and a stub curl on PATH
+# that always fails -- so the network branch is exercised as a failure and
+# never actually reached.
+#
+#   test/locate
+
+set -uo pipefail
+
+HERE="$(cd "$(dirname "$0")" && pwd)"
+LOCATE="$HERE/../bin/ab-locate"
+failures=0
+
+STUB="$(mktemp -d)"
+cat >"$STUB/curl" <<'STUBSH'
+#!/usr/bin/env bash
+echo "test/locate: the network must not be reached from a test" >&2
+exit 7
+STUBSH
+chmod +x "$STUB/curl"
+trap 'rm -rf "$STUB"' EXIT
+
+check() {
+  local name="$1" actual="$2" expected="$3"
+  [[ "$actual" == "$expected" ]] && return
+  failures=$((failures + 1))
+  printf 'FAIL  %s\n        expected: [%s]\n        actual:   [%s]\n' \
+    "$name" "$expected" "$actual"
+}
+
+# Run ab-locate against a HOME containing exactly this weather.json.
+locate_with() {
+  local weather="$1" home
+  home="$(mktemp -d)"
+  mkdir -p "$home/.local/state/omarchy/settings"
+  printf '%s' "$weather" >"$home/.local/state/omarchy/settings/weather.json"
+  PATH="$STUB:$PATH" HOME="$home" XDG_STATE_HOME="$home/empty" "$LOCATE"
+  rm -rf "$home"
+}
+
+# A weather file carrying this name, with valid coordinates. `--arg` rather
+# than string interpolation, so a payload containing a quote stays one value.
+with_name() { jq -cn --arg n "$1" '{name:$n,latitude:41.9965,longitude:21.4314}'; }
+name_of() { locate_with "$(with_name "$1")" | jq -r '.name'; }
+
+# ------------------------------------------------------ real names survive intact
+check "keeps an ordinary name" "$(name_of 'Skopje')" "Skopje"
+
+# Place names are not ASCII, and the filter must not pretend otherwise. These
+# are the shapes a naive [A-Za-z ] whitelist would destroy.
+for city in "Скопје" "東京" "L'Aquila" "Saint-Denis" "Washington, D.C." \
+            "Sofia (Sofiya)" "San José" "Ra's al-Khaimah" "Đà Nẵng" "Málaga" \
+            "Stratford-upon-Avon" "N'Djamena"; do
+  check "keeps $city" "$(name_of "$city")" "$city"
+done
+
+# ----------------------------------------------------------- markup does not
+# Nothing here may come back holding < > & " \ $ ` or a brace. Those are what
+# turn a label into markup at a sink that renders rich text, which is the
+# failure this filter and Panel.qml's textFormat both exist to prevent.
+#
+# The payloads are jq string literals, so the control characters exist in the
+# value under test without existing in this file.
+payloads=(
+  '"<b>Skopje</b>"'
+  '"<img src=x onerror=1>"'
+  '"<img src=\"file:///etc/passwd\">"'
+  '"<!DOCTYPE html><html>Skopje"'
+  '"A &amp; B &#60;i&#62;"'
+  '"<a href=\"http://example.com\">Skopje</a>"'
+  '"Skopje<br/><span style=\"x\">y</span>"'
+  '"\u001b[31mSkopje\u001b[0m"'
+  '"Skopje\u0007\u007f"'
+  '"{\"json\":\"ish\"}"'
+  '"$(id)`id`"'
+  '"\u202eevil"'
+)
+for literal in "${payloads[@]}"; do
+  payload="$(jq -rn "$literal")"
+  got="$(name_of "$payload")"
+  case "$got" in
+    *'<'*|*'>'*|*'&'*|*'"'*|*'\'*|*'$'*|*'`'*|*'{'*)
+      failures=$((failures + 1))
+      printf 'FAIL  markup survives sanitising: [%s] -> [%s]\n' "$literal" "$got" ;;
+  esac
+done
+
+check "strips the tag, keeps the word" "$(name_of '<b>Skopje</b>')" "bSkopjeb"
+check "collapses whitespace and trims" \
+  "$(name_of "$(printf '  Skopje\n\tCity  ')")" "Skopje City"
+check "caps the length at 64 characters" \
+  "$(name_of "$(printf 'a%.0s' {1..200})" | wc -c)" "65"
+check "a missing name is empty, not null" \
+  "$(locate_with '{"latitude":1,"longitude":1}' | jq -r '.name')" ""
+check "a non-string name is dropped whole" \
+  "$(locate_with '{"name":{"a":1},"latitude":1,"longitude":1}' | jq -r '.name')" ""
+
+# A NUL cannot travel through a bash string, so this one is written straight
+# into the file as the JSON escape a remote service would actually send.
+check "decodes and drops an escaped NUL" \
+  "$(locate_with '{"name":"Sko\u0000pje","latitude":1,"longitude":1}' | jq -r '.name')" "Skopje"
+check "decodes and drops an escaped tag" \
+  "$(locate_with '{"name":"\u003cb\u003eSkopje","latitude":1,"longitude":1}' | jq -r '.name')" "bSkopje"
+
+# --------------------------------------------------------- coordinates are real
+# A file failing these falls through to the next source; with no cache and a
+# stub curl, the observable result is the error object rather than a location.
+rejects() {
+  local got
+  got="$(locate_with "$1" | jq -r 'if .error then "rejected" else "accepted" end')"
+  check "rejects $2" "$got" "rejected"
+}
+rejects '{"name":"X","latitude":91,"longitude":0}' "a latitude off the planet"
+rejects '{"name":"X","latitude":-91,"longitude":0}' "a latitude below the pole"
+rejects '{"name":"X","latitude":0,"longitude":181}' "a longitude off the planet"
+rejects '{"name":"X","latitude":"41.99","longitude":21.4}' "a string latitude"
+rejects '{"name":"X","latitude":null,"longitude":21.4}' "a null latitude"
+rejects 'not json at all' "a malformed file"
+rejects '[]' "an array where an object belongs"
+
+check "accepts the extremes" \
+  "$(locate_with '{"name":"Pole","latitude":-90,"longitude":180}' \
+    | jq -c '[.latitude,.longitude]')" "[-90,180]"
+
+# ------------------------------------------------------- output is always JSON
+# Service.qml JSON.parses this unconditionally, so there is no such thing as a
+# run that prints nothing or prints prose.
+check "always emits one object" "$(locate_with 'garbage' | jq -r 'type')" "object"
+
+if [[ $failures -eq 0 ]]; then
+  echo "ab-locate: all checks passed"
+else
+  echo "$failures failing check(s)"
+  exit 1
+fi

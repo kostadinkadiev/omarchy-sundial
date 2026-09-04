@@ -4,6 +4,7 @@ import Quickshell.Io
 import "lib/Solar.js" as Solar
 import "lib/Curve.js" as Curve
 import "lib/Sensor.js" as Sensor
+import "lib/Safe.js" as Safe
 
 // Singleton backend. Owns the control loop, the hardware handles, and the
 // settings read out of shell.json; the bar widget is a pure view onto it.
@@ -538,11 +539,16 @@ Item {
           if (data.error) {
             root.latitude = NaN
             root.longitude = NaN
-            root.locationError = String(data.error)
+            root.locationError = Safe.plain(data.error)
           } else {
             root.latitude = parseFloat(data.latitude)
             root.longitude = parseFloat(data.longitude)
-            root.locationName = String(data.name || "")
+            // The name is the one value in this file that a stranger may
+            // have written -- bin/ab-locate takes it from the weather widget's
+            // location or from an IP lookup. It is filtered there and rendered
+            // as plain text in Panel.qml; this is the boundary in between, so
+            // that nothing downstream depends on either of those holding.
+            root.locationName = Safe.plain(data.name)
             root.locationError = ""
           }
           root.updateSunEvents(true)
